@@ -7,3 +7,5 @@ tqdm>=4.64.0
 matplotlib>=3.5.0
 wandb>=0.15.0
 accelerate>=1.11.0
+onnx>=1.19.1
+

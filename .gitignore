@@ -52,6 +52,8 @@ models/
 *.pt
 *.pth
 *.ckpt
+*.onnx
+*.pbtxt
 
 # Data
 data/
