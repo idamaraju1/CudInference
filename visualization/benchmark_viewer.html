@@ -1,0 +1,1027 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ONNX Performance Monitor | GPU Inference Telemetry</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        /* Custom animations */
+        @keyframes slideIn {
+            from {
+                transform: translateX(-100%);
+            }
+
+            to {
+                transform: translateX(0);
+            }
+        }
+
+        .animate-slide-in {
+            animation: slideIn 0.05s linear;
+        }
+
+        /* Overriding default body style for Tailwind */
+        body {
+            font-family: 'IBM Plex Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+            background: #F7F8FA;
+            /* Default background */
+            padding: 24px 16px;
+            /* Default padding */
+            color: #1E1E1E;
+            /* Default text color */
+            min-height: 100vh;
+        }
+
+        /* Custom styles that might conflict with Tailwind, ensure Tailwind is prioritized or use !important if necessary */
+        .container {
+            max-width: 1400px;
+            margin: 0 auto;
+            background: #FFFFFF;
+            border: 1px solid #E2E2E2;
+            border-radius: 2px;
+            overflow: hidden;
+        }
+
+        .header {
+            background: #FFFFFF;
+            border-bottom: 1px solid #E2E2E2;
+            padding: 28px 32px;
+            text-align: left;
+        }
+
+        .header h1 {
+            font-size: 1.6em;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #1E1E1E;
+            letter-spacing: -0.01em;
+            text-transform: uppercase;
+        }
+
+        .header p {
+            font-size: 0.85em;
+            color: #6B6B6B;
+            font-weight: 400;
+            letter-spacing: 0.02em;
+        }
+
+        .input-section {
+            padding: 24px 32px;
+            background: #FAFAFA;
+            border-bottom: 1px solid #E2E2E2;
+        }
+
+        .input-controls {
+            display: flex;
+            flex-direction: column;
+            gap: 16px;
+        }
+
+        @media (min-width: 768px) {
+            .input-controls {
+                flex-direction: row;
+                align-items: flex-end;
+                gap: 16px;
+            }
+        }
+
+        textarea {
+            flex: 1;
+            min-height: 100px;
+            padding: 12px 16px;
+            border: 1px solid #E2E2E2;
+            border-radius: 2px;
+            font-family: 'IBM Plex Sans', monospace;
+            font-size: 13px;
+            line-height: 1.5;
+            resize: vertical;
+            background: #FFFFFF;
+            color: #1E1E1E;
+            transition: border-color 0.2s ease;
+        }
+
+        textarea:focus {
+            outline: none;
+            border-color: #2F5DFF;
+        }
+
+        .button-group {
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+            width: 100%;
+        }
+
+        @media (min-width: 768px) {
+            .button-group {
+                flex-direction: row;
+                width: auto;
+            }
+        }
+
+        .btn-primary {
+            background: #FFFFFF;
+            color: #2F5DFF;
+            border: 1px solid #2F5DFF;
+            padding: 10px 24px;
+            border-radius: 2px;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: 'IBM Plex Sans', sans-serif;
+            cursor: pointer;
+            transition: all 0.2s ease;
+            flex: 1;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+
+        @media (min-width: 768px) {
+            .btn-primary {
+                flex: auto;
+            }
+        }
+
+        .btn-primary:hover {
+            background: #2F5DFF;
+            color: #FFFFFF;
+        }
+
+        .btn-primary:active {
+            opacity: 0.9;
+        }
+
+        .file-input-wrapper {
+            position: relative;
+            width: 100%;
+        }
+
+        @media (min-width: 768px) {
+            .file-input-wrapper {
+                width: auto;
+            }
+        }
+
+        .file-input-wrapper input[type=file] {
+            display: none;
+        }
+
+        .file-input-label {
+            background: #FFFFFF;
+            color: #3A7D44;
+            border: 1px solid #3A7D44;
+            padding: 10px 24px;
+            border-radius: 2px;
+            font-size: 12px;
+            font-weight: 500;
+            font-family: 'IBM Plex Sans', sans-serif;
+            cursor: pointer;
+            display: block;
+            text-align: center;
+            transition: all 0.2s ease;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+
+        .file-input-label:hover {
+            background: #3A7D44;
+            color: #FFFFFF;
+        }
+
+        .stats-box {
+            padding: 28px 32px;
+            background: #FAFAFA;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+            gap: 16px;
+            border-bottom: 1px solid #E2E2E2;
+        }
+
+        @media (min-width: 640px) {
+            .stats-box {
+                grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            }
+        }
+
+        .stat-item {
+            padding: 16px;
+            background: #FFFFFF;
+            border-radius: 2px;
+            border: 1px solid #E2E2E2;
+            border-left: 3px solid #2F5DFF;
+            transition: all 0.2s ease;
+        }
+
+        .stat-item:hover {
+            border-color: #D0D0D0;
+            background: #FAFAFA;
+        }
+
+        .stat-label {
+            font-size: 0.7em;
+            color: #6B6B6B;
+            margin-bottom: 8px;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .stat-value {
+            font-size: 1.5em;
+            font-weight: 600;
+            color: #2F5DFF;
+            font-family: 'IBM Plex Sans', monospace;
+        }
+
+        .race-section {
+            padding: 36px 32px;
+            background: #FFFFFF;
+            border-bottom: 1px solid #E2E2E2;
+        }
+
+        .race-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 24px;
+            text-align: left;
+            color: #1E1E1E;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            border-left: 3px solid #2F5DFF;
+            padding-left: 12px;
+        }
+
+        .race-container {
+            max-width: 900px;
+            margin: 0 auto;
+        }
+
+        .race-track {
+            margin-bottom: 20px;
+        }
+
+        .track-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 8px;
+        }
+
+        .track-label {
+            font-size: 0.85em;
+            font-weight: 500;
+            letter-spacing: 0.03em;
+            text-transform: uppercase;
+        }
+
+        .track-label.cpu {
+            color: #2F5DFF;
+        }
+
+        .track-label.gpu {
+            color: #3A7D44;
+        }
+
+        .track-info {
+            font-size: 0.75em;
+            color: #6B6B6B;
+            font-weight: 400;
+            font-family: 'IBM Plex Sans', monospace;
+        }
+
+        .track-bar-container {
+            width: 100%;
+            height: 32px;
+            background: #FAFAFA;
+            border-radius: 2px;
+            overflow: hidden;
+            position: relative;
+            border: 1px solid #E2E2E2;
+        }
+
+        .track-bar {
+            height: 100%;
+            border-radius: 0;
+            position: absolute;
+            left: 0;
+            transition: left 0.05s linear;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: white;
+            font-weight: 600;
+            font-size: 0.75em;
+            min-width: 50px;
+        }
+
+        .track-bar.cpu {
+            background: #2F5DFF;
+        }
+
+        .track-bar.gpu {
+            background: #3A7D44;
+        }
+
+        .speed-control {
+            max-width: 900px;
+            margin: 0 auto 24px auto;
+            padding: 16px;
+            background: #FAFAFA;
+            border-radius: 2px;
+            border: 1px solid #E2E2E2;
+        }
+
+        .speed-control-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+
+        .speed-label {
+            font-size: 0.75em;
+            color: #6B6B6B;
+            font-weight: 500;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+        }
+
+        .speed-value {
+            font-size: 0.9em;
+            color: #2F5DFF;
+            font-weight: 600;
+            font-family: 'IBM Plex Sans', monospace;
+        }
+
+        .speed-slider {
+            width: 100%;
+            height: 4px;
+            border-radius: 2px;
+            background: #E2E2E2;
+            outline: none;
+            -webkit-appearance: none;
+            appearance: none;
+            border: none;
+        }
+
+        .speed-slider::-webkit-slider-thumb {
+            -webkit-appearance: none;
+            appearance: none;
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+            background: #2F5DFF;
+            cursor: pointer;
+            transition: all 0.2s ease;
+        }
+
+        .speed-slider::-webkit-slider-thumb:hover {
+            background: #1e45cc;
+        }
+
+        .speed-slider::-moz-range-thumb {
+            width: 16px;
+            height: 16px;
+            border-radius: 2px;
+            background: #2F5DFF;
+            cursor: pointer;
+            border: none;
+            transition: all 0.2s ease;
+        }
+
+        .speed-slider::-moz-range-thumb:hover {
+            background: #1e45cc;
+        }
+
+        .chart-section {
+            padding: 36px 32px;
+            background: #FAFAFA;
+        }
+
+        .chart-container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: #FFFFFF;
+            padding: 28px;
+            border-radius: 2px;
+            border: 1px solid #E2E2E2;
+        }
+
+        .chart-title {
+            font-size: 1.2em;
+            font-weight: 600;
+            margin-bottom: 24px;
+            color: #1E1E1E;
+            text-align: left;
+            text-transform: uppercase;
+            letter-spacing: 0.06em;
+            border-left: 3px solid #2F5DFF;
+            padding-left: 12px;
+        }
+
+        .svg-chart {
+            width: 100%;
+            max-width: 1000px;
+            margin: 0 auto;
+            display: block;
+        }
+
+        .bar-label {
+            font-size: 11px;
+            font-weight: 500;
+            fill: #6B6B6B;
+            font-family: 'IBM Plex Sans', monospace;
+            letter-spacing: 0.03em;
+        }
+
+        .bar-value {
+            font-size: 10px;
+            font-weight: 600;
+            fill: #1E1E1E;
+            font-family: 'IBM Plex Sans', monospace;
+        }
+
+        .axis-label {
+            font-size: 12px;
+            font-weight: 400;
+            fill: #6B6B6B;
+            font-family: 'IBM Plex Sans', monospace;
+            letter-spacing: 0.03em;
+        }
+
+        .cpu-bar {
+            fill: #2F5DFF;
+            transition: all 0.2s ease;
+        }
+
+        .cpu-bar:hover {
+            fill: #1e45cc;
+        }
+
+        .gpu-bar {
+            fill: #3A7D44;
+            transition: all 0.2s ease;
+        }
+
+        .gpu-bar:hover {
+            fill: #2a5a32;
+        }
+
+        .error {
+            background: #FAFAFA;
+            border: 1px solid #E2E2E2;
+            border-left: 3px solid #DC2626;
+            border-radius: 2px;
+            padding: 16px;
+            margin: 16px 32px 0 32px;
+            color: #B91C1C;
+            font-size: 0.85em;
+            line-height: 1.5;
+            font-family: 'IBM Plex Sans', monospace;
+        }
+
+        .hidden {
+            display: none;
+        }
+
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: #FAFAFA;
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: #D0D0D0;
+            border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: #B0B0B0;
+        }
+    </style>
+</head>
+
+<body class="bg-slate-50">
+    <div class="max-w-6xl mx-auto bg-white border border-slate-200 rounded-sm overflow-hidden">
+        <!-- Header -->
+        <div class="border-b border-slate-200 px-8 py-7">
+            <h1 class="text-2xl font-semibold text-slate-900 mb-2 uppercase tracking-tight">ONNX Performance Monitor
+            </h1>
+            <p class="text-sm text-slate-500 font-normal tracking-wide">GPU Inference Telemetry & Multi-Threading
+                Analysis</p>
+        </div>
+
+        <!-- Input Section -->
+        <div class="bg-slate-50 border-b border-slate-200 px-8 py-6">
+            <div class="flex flex-col gap-4 md:flex-row md:items-end md:gap-4">
+                <textarea id="jsonInput" placeholder="Paste JSON benchmark data or load a file..."
+                    class="flex-1 min-h-24 px-4 py-3 border border-slate-200 rounded-sm font-mono text-xs leading-relaxed bg-white text-slate-900 focus:outline-none focus:border-blue-500 transition-colors resize-vertical"></textarea>
+                <div class="flex flex-col gap-3 w-full md:flex-row md:w-auto">
+                    <button onclick="loadData()"
+                        class="btn-primary px-6 py-2.5 bg-white border border-blue-600 text-blue-600 rounded-sm text-xs font-medium uppercase tracking-wider hover:bg-blue-600 hover:text-white transition-all active:opacity-90 md:flex-none flex-1">Execute</button>
+                    <div class="relative w-full md:w-auto">
+                        <input type="file" id="fileInput" accept=".json" onchange="loadFile(event)" class="hidden">
+                        <label for="fileInput"
+                            class="flex items-center justify-center px-6 py-2.5 bg-white border border-green-700 text-green-700 rounded-sm text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-green-700 hover:text-white transition-all">Load
+                            JSON</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Error Message -->
+        <div id="error"
+            class="bg-slate-50 border-l-4 border-red-600 px-8 py-4 mx-8 mt-0 text-red-700 text-sm leading-relaxed font-mono hidden">
+        </div>
+
+        <!-- Stats Box -->
+        <div id="statsBox"
+            class="bg-slate-50 border-b border-slate-200 px-8 py-7 grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4 hidden">
+            <!-- Stats will be inserted here -->
+        </div>
+
+        <!-- Race Section -->
+        <div id="raceSection" class="bg-white border-b border-slate-200 px-8 py-9 hidden">
+            <h2
+                class="text-xl font-semibold text-slate-900 mb-6 uppercase tracking-wide border-l-3 border-blue-600 pl-3">
+                Real-Time Execution Monitor</h2>
+            <div class="max-w-4xl mx-auto">
+                <div class="bg-slate-50 border border-slate-200 rounded-sm p-4 mb-6">
+                    <div class="flex justify-between items-center mb-3">
+                        <div class="flex items-center gap-3">
+                            <span class="text-xs text-slate-500 font-medium uppercase tracking-widest">Animation
+                                Speed</span>
+                            <button id="pauseButton" onclick="togglePause()"
+                                class="px-3 py-1 bg-white border border-slate-300 text-slate-600 rounded-sm text-xs font-medium uppercase tracking-wider hover:bg-slate-100 hover:border-slate-400 transition-all active:opacity-90">
+                                ⏸ Pause
+                            </button>
+                        </div>
+                        <span class="text-sm text-blue-600 font-semibold font-mono" id="speedValue">5x</span>
+                    </div>
+                    <input type="range"
+                        class="speed-slider w-full h-1 bg-slate-200 rounded-sm outline-none appearance-none cursor-pointer"
+                        id="speedSlider" min="0.1" max="100" value="5" step="0.1">
+                </div>
+                <div id="raceTracks" class="space-y-5">
+                    <!-- Race tracks will be inserted here -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Chart Section -->
+        <div id="chartSection" class="bg-slate-50 px-8 py-9 hidden">
+            <div class="max-w-5xl mx-auto bg-white border border-slate-200 rounded-sm p-7">
+                <h3
+                    class="text-xl font-semibold text-slate-900 mb-6 uppercase tracking-wide border-l-3 border-blue-600 pl-3">
+                    Execution Time Analysis</h3>
+                <svg id="svgChart" class="w-full max-w-4xl mx-auto" viewBox="0 0 1000 500"></svg>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let raceAnimationId = null;
+        let raceData = [];
+        let speedScale = 5;
+        let isPaused = false;
+
+        document.addEventListener('DOMContentLoaded', function () {
+            const speedSlider = document.getElementById('speedSlider');
+            const speedValue = document.getElementById('speedValue');
+
+            speedSlider.addEventListener('input', function () {
+                speedScale = parseFloat(this.value);
+                speedValue.textContent = `${speedScale.toFixed(1)}x`;
+
+                if (raceData.length > 0 && !isPaused) {
+                    startRaceAnimation();
+                }
+            });
+        });
+
+        function togglePause() {
+            isPaused = !isPaused;
+            const pauseButton = document.getElementById('pauseButton');
+
+            if (isPaused) {
+                pauseButton.innerHTML = '▶ Play';
+                pauseButton.classList.add('border-blue-600', 'text-blue-600');
+                pauseButton.classList.remove('border-slate-300', 'text-slate-600');
+                if (raceAnimationId) {
+                    cancelAnimationFrame(raceAnimationId);
+                    raceAnimationId = null;
+                }
+            } else {
+                pauseButton.innerHTML = '⏸ Pause';
+                pauseButton.classList.remove('border-blue-600', 'text-blue-600');
+                pauseButton.classList.add('border-slate-300', 'text-slate-600');
+                if (raceData.length > 0) {
+                    startRaceAnimation();
+                }
+            }
+        }
+
+        function loadFile(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    document.getElementById('jsonInput').value = e.target.result;
+                    loadData();
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function showError(message) {
+            const errorDiv = document.getElementById('error');
+            errorDiv.textContent = message;
+            errorDiv.classList.remove('hidden');
+        }
+
+        function hideError() {
+            document.getElementById('error').classList.add('hidden');
+        }
+
+        function parseData(data) {
+            const configs = [];
+
+            for (let key in data) {
+                if (key.startsWith('total_cpu_') && key.endsWith('_ms')) {
+                    const match = key.match(/total_cpu_(\d+)_thread/);
+                    if (match) {
+                        const threads = parseInt(match[1]);
+                        configs.push({
+                            name: `CPU ${threads}T`,
+                            threads: threads,
+                            time: data[key],
+                            type: 'cpu'
+                        });
+                    }
+                }
+            }
+
+            if (data.total_gpu_ms !== undefined) {
+                configs.push({
+                    name: 'GPU',
+                    threads: 0,
+                    time: data.total_gpu_ms,
+                    type: 'gpu'
+                });
+            }
+
+            configs.sort((a, b) => {
+                if (a.type === 'cpu' && b.type === 'cpu') {
+                    return a.threads - b.threads;
+                }
+                if (a.type === 'cpu') return -1;
+                if (b.type === 'cpu') return 1;
+                return 0;
+            });
+
+            return configs;
+        }
+
+        function loadData() {
+            hideError();
+
+            const jsonText = document.getElementById('jsonInput').value.trim();
+            if (!jsonText) {
+                showError('Please paste JSON data or load a file');
+                return;
+            }
+
+            let data;
+            try {
+                data = JSON.parse(jsonText);
+            } catch (e) {
+                showError('Invalid JSON: ' + e.message);
+                return;
+            }
+
+            const configs = parseData(data);
+            if (configs.length === 0) {
+                showError('No valid configuration data found in JSON');
+                return;
+            }
+
+            raceData = configs;
+
+            document.getElementById('statsBox').classList.remove('hidden');
+            document.getElementById('raceSection').classList.remove('hidden');
+            document.getElementById('chartSection').classList.remove('hidden');
+
+            renderStats(configs, data);
+            renderRaceTracks(configs);
+            startRaceAnimation();
+            renderChart(configs);
+        }
+
+        function renderStats(configs, data) {
+            const statsBox = document.getElementById('statsBox');
+
+            const cpuSingle = configs.find(c => c.threads === 1);
+            const cpuMax = configs.filter(c => c.type === 'cpu').reduce((max, c) =>
+                c.threads > max.threads ? c : max, { threads: 0 });
+            const gpu = configs.find(c => c.type === 'gpu');
+
+            let statsHTML = '';
+
+            if (data.max_threads) {
+                statsHTML += `
+                    <div class="bg-white border border-slate-200 border-l-4 border-l-blue-600 rounded-sm p-4 hover:bg-slate-50 transition-colors">
+                        <div class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2">Max Threads</div>
+                        <div class="text-2xl font-semibold text-blue-600 font-mono">${data.max_threads}</div>
+                    </div>
+                `;
+            }
+
+            if (cpuSingle) {
+                statsHTML += `
+                    <div class="bg-white border border-slate-200 border-l-4 border-l-blue-600 rounded-sm p-4 hover:bg-slate-50 transition-colors">
+                        <div class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2">CPU (1 Thread)</div>
+                        <div class="text-2xl font-semibold text-blue-600 font-mono">${cpuSingle.time.toFixed(2)} ms</div>
+                    </div>
+                `;
+            }
+
+            if (cpuMax.threads > 0) {
+                statsHTML += `
+                    <div class="bg-white border border-slate-200 border-l-4 border-l-blue-600 rounded-sm p-4 hover:bg-slate-50 transition-colors">
+                        <div class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2">CPU (${cpuMax.threads} Threads)</div>
+                        <div class="text-2xl font-semibold text-blue-600 font-mono">${cpuMax.time.toFixed(2)} ms</div>
+                    </div>
+                `;
+            }
+
+            if (cpuSingle && cpuMax.threads > 1) {
+                const mtSpeedup = cpuSingle.time / cpuMax.time;
+                statsHTML += `
+                    <div class="bg-white border border-slate-200 border-l-4 border-l-blue-600 rounded-sm p-4 hover:bg-slate-50 transition-colors">
+                        <div class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2">MT Speedup</div>
+                        <div class="text-2xl font-semibold text-blue-600 font-mono">${mtSpeedup.toFixed(2)}x</div>
+                    </div>
+                `;
+            }
+
+            if (gpu) {
+                statsHTML += `
+                    <div class="bg-white border border-slate-200 border-l-4 border-l-green-700 rounded-sm p-4 hover:bg-slate-50 transition-colors">
+                        <div class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2">GPU</div>
+                        <div class="text-2xl font-semibold text-green-700 font-mono">${gpu.time.toFixed(2)} ms</div>
+                    </div>
+                `;
+            }
+
+            if (cpuSingle && gpu) {
+                const gpuSpeedup = cpuSingle.time / gpu.time;
+                statsHTML += `
+                    <div class="bg-white border border-slate-200 border-l-4 border-l-green-700 rounded-sm p-4 hover:bg-slate-50 transition-colors">
+                        <div class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2">GPU vs CPU-1T</div>
+                        <div class="text-2xl font-semibold text-green-700 font-mono">${gpuSpeedup.toFixed(2)}x</div>
+                    </div>
+                `;
+            }
+
+            statsBox.innerHTML = statsHTML;
+        }
+
+        function renderRaceTracks(configs) {
+            const tracksContainer = document.getElementById('raceTracks');
+            tracksContainer.innerHTML = '';
+
+            configs.forEach(config => {
+                const trackHTML = `
+                    <div class="space-y-2">
+                        <div class="flex justify-between items-center">
+                            <span class="text-sm font-medium uppercase tracking-wider ${config.type === 'cpu' ? 'text-blue-600' : 'text-green-700'}">${config.name}</span>
+                            <span class="text-xs text-slate-500 font-mono" data-track="${config.name}">0.00 ms</span>
+                        </div>
+                        <div class="w-full h-8 bg-slate-50 rounded-sm overflow-hidden relative border border-slate-200">
+                            <div class="track-bar h-full ${config.type === 'cpu' ? 'bg-blue-600' : 'bg-green-700'} absolute left-0 flex items-center justify-center" data-bar="${config.name}" style="width: 50px;">
+                                <span class="text-xs font-semibold text-white font-mono" data-badge="${config.name}">1.0x</span>
+                            </div>
+                        </div>
+                    </div>
+                `;
+                tracksContainer.insertAdjacentHTML('beforeend', trackHTML);
+            });
+        }
+
+        function startRaceAnimation() {
+            if (raceAnimationId) {
+                cancelAnimationFrame(raceAnimationId);
+            }
+
+            const fastest = Math.min(...raceData.map(c => c.time));
+
+            raceData.forEach(config => {
+                const info = document.querySelector(`[data-track="${config.name}"]`);
+                const badge = document.querySelector(`[data-badge="${config.name}"]`);
+
+                if (info) info.textContent = `${config.time.toFixed(2)} ms`;
+
+                const speedup = config.time / fastest;
+                if (badge) {
+                    if (config.time === fastest) {
+                        badge.textContent = '1x';
+                    } else {
+                        badge.textContent = `${speedup.toFixed(2)}x`;
+                    }
+                }
+            });
+
+            const animState = raceData.map(config => ({
+                config: config,
+                duration: config.time / speedScale,
+                startTime: null,
+                direction: 1
+            }));
+
+            function animate(timestamp) {
+                animState.forEach(state => {
+                    const bar = document.querySelector(`[data-bar="${state.config.name}"]`);
+                    if (!bar) return;
+
+                    if (state.startTime === null) state.startTime = timestamp;
+
+                    const elapsed = timestamp - state.startTime;
+                    let progress = (elapsed / state.duration) * 100;
+
+                    let pos = state.direction === 1 ? progress : 100 - progress;
+
+                    if (progress >= 100) {
+                        state.direction *= -1;
+                        state.startTime = timestamp;
+                    }
+
+                    pos = Math.max(0, Math.min(100, pos));
+
+                    const maxWidth = bar.parentElement.offsetWidth - 50;
+                    bar.style.left = (pos / 100 * maxWidth) + 'px';
+                    bar.style.width = '50px';
+                });
+
+                raceAnimationId = requestAnimationFrame(animate);
+            }
+
+            if (isPaused) {
+                return;
+            }
+            raceAnimationId = requestAnimationFrame(animate);
+        }
+
+        function renderChart(configs) {
+            const svg = document.getElementById('svgChart');
+            svg.innerHTML = '';
+
+            const width = 1000;
+            const height = 500;
+            const padding = { top: 40, right: 60, bottom: 100, left: 100 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            // Convert times to seconds
+            const maxValueMs = Math.max(...configs.map(c => c.time));
+            const maxValueSec = maxValueMs / 1000;
+            const scale = chartHeight / maxValueSec;
+
+            // Calculate nice Y-axis ticks
+            const numTicks = 5;
+            const tickInterval = Math.ceil(maxValueSec / numTicks * 10) / 10; // Round to 1 decimal
+            const maxTick = tickInterval * numTicks;
+            const adjustedScale = chartHeight / maxTick;
+
+            // Draw Y-axis line
+            const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            yAxis.setAttribute('x1', padding.left);
+            yAxis.setAttribute('y1', padding.top);
+            yAxis.setAttribute('x2', padding.left);
+            yAxis.setAttribute('y2', padding.top + chartHeight);
+            yAxis.setAttribute('stroke', '#D0D0D0');
+            yAxis.setAttribute('stroke-width', '2');
+            svg.appendChild(yAxis);
+
+            // Draw Y-axis ticks and gridlines
+            for (let i = 0; i <= numTicks; i++) {
+                const tickValue = i * tickInterval;
+                const yPos = padding.top + chartHeight - (tickValue * adjustedScale);
+
+                // Gridline
+                const gridline = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                gridline.setAttribute('x1', padding.left);
+                gridline.setAttribute('y1', yPos);
+                gridline.setAttribute('x2', padding.left + chartWidth);
+                gridline.setAttribute('y2', yPos);
+                gridline.setAttribute('stroke', '#E2E2E2');
+                gridline.setAttribute('stroke-width', '1');
+                gridline.setAttribute('stroke-dasharray', i === 0 ? 'none' : '4,4');
+                svg.appendChild(gridline);
+
+                // Tick mark
+                const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                tick.setAttribute('x1', padding.left - 5);
+                tick.setAttribute('y1', yPos);
+                tick.setAttribute('x2', padding.left);
+                tick.setAttribute('y2', yPos);
+                tick.setAttribute('stroke', '#64748b');
+                tick.setAttribute('stroke-width', '2');
+                svg.appendChild(tick);
+
+                // Tick label
+                const tickLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                tickLabel.setAttribute('x', padding.left - 10);
+                tickLabel.setAttribute('y', yPos + 4);
+                tickLabel.setAttribute('text-anchor', 'end');
+                tickLabel.setAttribute('font-size', '11px');
+                tickLabel.setAttribute('font-weight', '400');
+                tickLabel.setAttribute('fill', '#64748b');
+                tickLabel.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                tickLabel.textContent = tickValue.toFixed(1);
+                svg.appendChild(tickLabel);
+            }
+
+            const barWidth = Math.min(60, chartWidth / configs.length - 20);
+            const totalBarsWidth = configs.length * barWidth + (configs.length - 1) * 20;
+            const startX = padding.left + (chartWidth - totalBarsWidth) / 2;
+
+            configs.forEach((config, i) => {
+                const timeInSeconds = config.time / 1000;
+                const barHeight = timeInSeconds * adjustedScale;
+                const x = startX + i * (barWidth + 20);
+                const y = padding.top + chartHeight - barHeight;
+
+                const bar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                bar.setAttribute('class', config.type === 'gpu' ? 'gpu-bar' : 'cpu-bar');
+                bar.setAttribute('x', x);
+                bar.setAttribute('y', y);
+                bar.setAttribute('width', barWidth);
+                bar.setAttribute('height', barHeight);
+                bar.setAttribute('rx', '6');
+                bar.setAttribute('fill', config.type === 'gpu' ? '#15803d' : '#2563eb');
+                svg.appendChild(bar);
+
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', x + barWidth / 2);
+                label.setAttribute('y', padding.top + chartHeight + 25);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('font-size', '11px');
+                label.setAttribute('font-weight', '500');
+                label.setAttribute('fill', '#64748b');
+                label.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                label.setAttribute('letter-spacing', '0.03em');
+                label.textContent = config.name;
+                svg.appendChild(label);
+
+                const value = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                value.setAttribute('x', x + barWidth / 2);
+                value.setAttribute('y', y - 8);
+                value.setAttribute('text-anchor', 'middle');
+                value.setAttribute('font-size', '10px');
+                value.setAttribute('font-weight', '600');
+                value.setAttribute('fill', '#1e293b');
+                value.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                value.textContent = `${timeInSeconds.toFixed(3)} s`;
+                svg.appendChild(value);
+            });
+
+            const yAxisLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            yAxisLabel.setAttribute('x', 20);
+            yAxisLabel.setAttribute('y', padding.top + chartHeight / 2);
+            yAxisLabel.setAttribute('text-anchor', 'middle');
+            yAxisLabel.setAttribute('transform', `rotate(-90, 20, ${padding.top + chartHeight / 2})`);
+            yAxisLabel.setAttribute('font-size', '12px');
+            yAxisLabel.setAttribute('font-weight', '400');
+            yAxisLabel.setAttribute('fill', '#64748b');
+            yAxisLabel.setAttribute('font-family', "'IBM Plex Sans', monospace");
+            yAxisLabel.setAttribute('letter-spacing', '0.03em');
+            yAxisLabel.textContent = 'Execution Time (s)';
+            svg.appendChild(yAxisLabel);
+
+            const cpuSingle = configs.find(c => c.threads === 1);
+            const gpu = configs.find(c => c.type === 'gpu');
+            if (cpuSingle && gpu) {
+                const speedup = (cpuSingle.time / gpu.time).toFixed(2);
+                const speedupText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                speedupText.setAttribute('x', width / 2);
+                speedupText.setAttribute('y', padding.top + chartHeight + 70);
+                speedupText.setAttribute('text-anchor', 'middle');
+                speedupText.setAttribute('font-size', '10px');
+                speedupText.setAttribute('font-weight', '600');
+                speedupText.setAttribute('fill', '#0d9488');
+                speedupText.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                speedupText.textContent = `⟩ gpu speedup: ${speedup}x vs single-threaded cpu`;
+                svg.appendChild(speedupText);
+            }
+        }
+    </script>
+</body>
+
+</html>

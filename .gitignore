@@ -1,0 +1,43 @@
+# Build directories
+build/
+cmake-build-*/
+
+# Generated protobuf files
+third_party/onnx/*.pb.cc
+third_party/onnx/*.pb.h
+
+# ONNX model files (examples)
+*.onnx
+
+# IDE files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Compiled objects
+*.o
+*.a
+*.so
+*.dylib
+
+# Executables
+onnx_gpu_engine
+
+# macOS
+.DS_Store
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.egg-info/
+venv/
+.venv/
+
+# Logs
+*.log
+
+# AI 
+.claude/
