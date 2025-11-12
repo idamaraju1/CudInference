@@ -66,6 +66,7 @@ int main(int argc, char** argv) {
     std::string model_path;
     bool use_cpu = false;
     bool verbose = false;
+    bool use_mt_parser = false;
     bool debug = false;
     bool benchmark = false;
     std::string output_file;
@@ -90,6 +91,8 @@ int main(int argc, char** argv) {
             verbose = true;
         } else if (arg == "--debug") {
             debug = true;
+        } else if (arg == "--mt-parser") {
+            use_mt_parser = true;
         } else if (arg == "--benchmark") {
             benchmark = true;
         } else if (arg == "--output") {
@@ -126,8 +129,16 @@ int main(int argc, char** argv) {
         // Step 1: Parse the model
         auto start_time = std::chrono::high_resolution_clock::now();
 
-        ModelParser parser;
-        auto graph = parser.parse(model_path);
+        // Choose parser implementation
+        std::shared_ptr<onnx_runner::Graph> graph;
+
+        if (use_mt_parser) {
+            onnx_runner::ModelParserMultiThreaded parser;
+            graph = parser.parse(model_path);
+        } else {
+            onnx_runner::ModelParser parser;
+            graph = parser.parse(model_path);
+        }
 
         auto parse_time = std::chrono::high_resolution_clock::now();
         auto parse_duration = std::chrono::duration_cast<std::chrono::milliseconds>(

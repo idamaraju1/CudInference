@@ -26,7 +26,7 @@ import subprocess
 
 # config
 BASELINE_GPU_BIN = "./build/onnx_gpu_engine"       # baseline parser
-OPTIMIZED_GPU_BIN = "./build/onnx_gpu_engine_mt"   # multi-threaded parser
+OPTIMIZED_GPU_BIN = "./build/onnx_gpu_engine"   # multi-threaded parser
 
 
 # ---------------------------------------------------------------------
@@ -172,7 +172,7 @@ def benchmark_parsers(onnx_file):
 
     # Optimized GPU
     print("\n⚙️  Optimized GPU (multi-threaded parser)...")
-    stdout_opt, _ = run_engine(OPTIMIZED_GPU_BIN, onnx_file, extra_args=["--verbose"])
+    stdout_opt, _ = run_engine(OPTIMIZED_GPU_BIN, onnx_file, extra_args=["--verbose", "--mt-parser"])
     optimized_ms = extract_time_ms(stdout_opt)
     if optimized_ms is not None:
         print(f"  Optimized total time: {optimized_ms:.3f} ms")
