@@ -23,4 +23,22 @@ private:
     std::shared_ptr<Tensor> parseTensorProto(const void* tensor_proto);
 };
 
+// ModelParserMultiThreaded: alternative implementation with parallel parsing
+class ModelParserMultiThreaded {
+public:
+    ModelParserMultiThreaded() = default;
+
+    // Parse an ONNX model file and return a Graph
+    // Same interface as ModelParser, but implementation is multi-threaded
+    std::shared_ptr<Graph> parse(const std::string& model_path);
+
+private:
+    // Helper to convert ONNX data type to our DataType enum
+    DataType onnxDataTypeToDataType(int onnx_type);
+
+    // Helper to extract tensor data from ONNX TensorProto
+    std::shared_ptr<Tensor> parseTensorProto(const void* tensor_proto);
+};
+
+
 } // namespace onnx_runner
