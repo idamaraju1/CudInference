@@ -71,7 +71,7 @@ std::vector<int64_t> tokenizeText(const std::string& text, const std::string& to
     }
 
     // Call Python tokenizer script
-    std::string cmd = "python3 src/hf_tokenizer.py --tokenizer '" + tokenizer_path +
+    std::string cmd = "python3 scripts/hf_tokenizer.py --tokenizer '" + tokenizer_path +
                      "' --encode '" + escaped_text + "' 2>&1";
 
     std::string output = exec_command(cmd);
@@ -112,7 +112,7 @@ std::string decodeTokens(const std::vector<int64_t>& token_ids, const std::strin
     std::string ids_str = ids_stream.str();
 
     // Call Python tokenizer script
-    std::string cmd = "python3 src/hf_tokenizer.py --tokenizer '" + tokenizer_path +
+    std::string cmd = "python3 scripts/hf_tokenizer.py --tokenizer '" + tokenizer_path +
                      "' --decode '" + ids_str + "' 2>&1";
 
     std::string output = exec_command(cmd);
