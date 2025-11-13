@@ -463,15 +463,17 @@ GpuExecutor::execute(const Graph& graph,
     for (const auto& [name, tensor] : graph.initializers()) {
         LOG_DEBUG("Initializer: ", name, " ", tensor->shapeStr());
 
-        // DEBUG: Print first few values
-        const float* data_ptr = tensor->data<float>();
-        std::string values_str = "[";
-        for (size_t i = 0; i < std::min<size_t>(5, tensor->size()); ++i) {
-            values_str += std::to_string(data_ptr[i]);
-            if (i < std::min<size_t>(5, tensor->size()) - 1) values_str += ", ";
+        // DEBUG: Print first few values (only for CPU FLOAT32 tensors to avoid segfault)
+        if (tensor->device() == DeviceType::CPU && tensor->dtype() == DataType::FLOAT32 && tensor->size() > 0) {
+            const float* data_ptr = tensor->data<float>();
+            std::string values_str = "[";
+            for (size_t i = 0; i < std::min<size_t>(5, tensor->size()); ++i) {
+                values_str += std::to_string(data_ptr[i]);
+                if (i < std::min<size_t>(5, tensor->size()) - 1) values_str += ", ";
+            }
+            values_str += "]";
+            LOG_DEBUG("  First values: ", values_str);
         }
-        values_str += "]";
-        LOG_DEBUG("  First values: ", values_str);
 
         tensors_[name] = tensor;
 
@@ -688,6 +690,10 @@ std::shared_ptr<Tensor> GpuExecutor::getTensor(const std::string& name) {
         throw std::runtime_error("Tensor not found: " + name);
     }
     return it->second;
+}
+
+bool GpuExecutor::hasTensor(const std::string& name) const {
+    return tensors_.find(name) != tensors_.end();
 }
 
 std::shared_ptr<Tensor> GpuExecutor::allocateOutput(const std::vector<int64_t>& shape,

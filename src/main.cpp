@@ -1,14 +1,17 @@
-#include <sentencepiece_processor.h>
 #include "core/model_parser.hpp"
 #include "core/graph.hpp"
 #include "gpu/gpu_executor.hpp"
 #include "gpu/benchmark.hpp"
+#include "gpu/autoregressive_generator.hpp"
 #include "utils/logger.hpp"
 #include "utils/tensor.hpp"
 #include <iostream>
 #include <memory>
 #include <chrono>
 #include <fstream>
+#include <sstream>
+#include <array>
+#include <cstdio>
 
 
 using namespace onnx_runner;
@@ -24,7 +27,10 @@ void printUsage(const char* program_name) {
     std::cout << "  --benchmark       Run multi-configuration benchmark (CPU 1-N threads + GPU)\n";
     std::cout << "  --output FILE     Save benchmark results to JSON file (default: results.json)\n";
     std::cout << "  --input TEXT      Input text to tokenize\n";
-    std::cout << "  --tokenizer FILE  Path to SentencePiece model file (.model or .spm)\n";
+    std::cout << "  --tokenizer FILE  Path to tokenizer.json file\n";
+    std::cout << "  --generate        Enable autoregressive text generation\n";
+    std::cout << "  --max-tokens N    Maximum tokens to generate (default: 50)\n";
+    std::cout << "  --temperature F   Sampling temperature (default: 1.0, 0.0=greedy)\n";
     std::cout << "  --help            Show this help message\n";
 }
 
@@ -41,62 +47,88 @@ std::shared_ptr<Tensor> createTestInput(const std::vector<int64_t>& shape) {
     return tensor;
 }
 
-std::vector<int64_t> tokenizeText(const std::string& text, const std::string& tokenizer_path) {
-    static std::unique_ptr<sentencepiece::SentencePieceProcessor> processor;
-
-    if (!processor) {
-        processor = std::make_unique<sentencepiece::SentencePieceProcessor>();
-        const auto status = processor->Load(tokenizer_path);
-        
-        if (!status.ok()) {
-            std::cerr << "[Tokenizer] Failed to load SentencePiece model: " 
-                      << status.ToString() << std::endl;
-            throw std::runtime_error("Failed to load tokenizer");
-        }
-        
-        std::cout << "[Tokenizer] Loaded from: " << tokenizer_path << std::endl;
-        std::cout << "[Tokenizer] Vocabulary size: " << processor->GetPieceSize() << std::endl;
+// Helper function to execute a command and capture output
+std::string exec_command(const std::string& cmd) {
+    std::array<char, 128> buffer;
+    std::string result;
+    std::unique_ptr<FILE, decltype(&pclose)> pipe(popen(cmd.c_str(), "r"), pclose);
+    if (!pipe) {
+        throw std::runtime_error("popen() failed!");
     }
-
-    std::vector<int> token_ids;
-    const auto status = processor->Encode(text, &token_ids);
-    
-    if (!status.ok()) {
-        std::cerr << "[Tokenizer] Failed to encode text: " << status.ToString() << std::endl;
-        throw std::runtime_error("Failed to encode text");
+    while (fgets(buffer.data(), buffer.size(), pipe.get()) != nullptr) {
+        result += buffer.data();
     }
-
-    // Convert int to int64_t
-    std::vector<int64_t> result(token_ids.begin(), token_ids.end());
     return result;
 }
 
-// Decode token IDs back to text (optional, for debugging)
-std::string decodeTokens(const std::vector<int64_t>& token_ids, const std::string& tokenizer_path) {
-    static std::unique_ptr<sentencepiece::SentencePieceProcessor> processor;
-
-    if (!processor) {
-        processor = std::make_unique<sentencepiece::SentencePieceProcessor>();
-        const auto status = processor->Load(tokenizer_path);
-        
-        if (!status.ok()) {
-            std::cerr << "[Tokenizer] Failed to load SentencePiece model for decoding" << std::endl;
-            return "";
-        }
+std::vector<int64_t> tokenizeText(const std::string& text, const std::string& tokenizer_path) {
+    // Escape single quotes in text for shell command
+    std::string escaped_text = text;
+    size_t pos = 0;
+    while ((pos = escaped_text.find("'", pos)) != std::string::npos) {
+        escaped_text.replace(pos, 1, "'\\''");
+        pos += 4;
     }
 
-    // Convert int64_t to int
-    std::vector<int> ids(token_ids.begin(), token_ids.end());
-    
-    std::string text;
-    const auto status = processor->Decode(ids, &text);
-    
-    if (!status.ok()) {
-        std::cerr << "[Tokenizer] Failed to decode tokens: " << status.ToString() << std::endl;
+    // Call Python tokenizer script
+    std::string cmd = "python3 src/hf_tokenizer.py --tokenizer '" + tokenizer_path +
+                     "' --encode '" + escaped_text + "' 2>&1";
+
+    std::string output = exec_command(cmd);
+
+    // Check for errors
+    if (output.find("ERROR") != std::string::npos) {
+        std::cerr << "[Tokenizer] " << output;
+        throw std::runtime_error("Failed to tokenize text");
+    }
+
+    // Parse space-separated token IDs
+    std::vector<int64_t> token_ids;
+    std::istringstream iss(output);
+    int64_t id;
+    while (iss >> id) {
+        token_ids.push_back(id);
+    }
+
+    if (token_ids.empty()) {
+        std::cerr << "[Tokenizer] No tokens produced from text: " << text << std::endl;
+        throw std::runtime_error("Tokenization produced no tokens");
+    }
+
+    std::cout << "[Tokenizer] Loaded from: " << tokenizer_path << std::endl;
+    std::cout << "[Tokenizer] Token count: " << token_ids.size() << std::endl;
+
+    return token_ids;
+}
+
+// Decode token IDs back to text
+std::string decodeTokens(const std::vector<int64_t>& token_ids, const std::string& tokenizer_path) {
+    // Convert token IDs to space-separated string
+    std::ostringstream ids_stream;
+    for (size_t i = 0; i < token_ids.size(); ++i) {
+        if (i > 0) ids_stream << " ";
+        ids_stream << token_ids[i];
+    }
+    std::string ids_str = ids_stream.str();
+
+    // Call Python tokenizer script
+    std::string cmd = "python3 src/hf_tokenizer.py --tokenizer '" + tokenizer_path +
+                     "' --decode '" + ids_str + "' 2>&1";
+
+    std::string output = exec_command(cmd);
+
+    // Check for errors
+    if (output.find("ERROR") != std::string::npos) {
+        std::cerr << "[Tokenizer] Failed to decode tokens: " << output;
         return "";
     }
 
-    return text;
+    // Remove trailing newline if present
+    if (!output.empty() && output.back() == '\n') {
+        output.pop_back();
+    }
+
+    return output;
 }
 
 // Print first few values of a tensor for debugging
@@ -130,8 +162,11 @@ int main(int argc, char** argv) {
     bool verbose = false;
     bool debug = false;
     bool benchmark = false;
+    bool generate = false;
     std::string output_file;
     int cpu_threads = 0;  // Default to 0 (auto-detect hardware concurrency)
+    int max_tokens = 50;  // Default max tokens for generation
+    float temperature = 1.0f;  // Default temperature for sampling
     std::string user_input_text;
     std::string tokenizer_path;
 
@@ -180,6 +215,30 @@ int main(int argc, char** argv) {
                 std::cerr << "Error: --tokenizer requires a file path\n";
                 return 1;
             }
+        } else if (arg == "--generate") {
+            generate = true;
+        } else if (arg == "--max-tokens") {
+            if (i + 1 < argc) {
+                max_tokens = std::atoi(argv[++i]);
+                if (max_tokens < 1) {
+                    std::cerr << "Error: --max-tokens must be >= 1\n";
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: --max-tokens requires a number\n";
+                return 1;
+            }
+        } else if (arg == "--temperature") {
+            if (i + 1 < argc) {
+                temperature = std::atof(argv[++i]);
+                if (temperature < 0.0f) {
+                    std::cerr << "Error: --temperature must be >= 0.0\n";
+                    return 1;
+                }
+            } else {
+                std::cerr << "Error: --temperature requires a number\n";
+                return 1;
+            }
         } else if (arg[0] != '-') {
             model_path = arg;
         }
@@ -215,6 +274,44 @@ int main(int argc, char** argv) {
 
         // Step 2: Print graph summary
         graph->printSummary();
+
+        // Step 2.5: Handle autoregressive generation mode
+        if (generate) {
+            if (user_input_text.empty()) {
+                std::cerr << "Error: --generate requires --input <text>\n";
+                return 1;
+            }
+            if (tokenizer_path.empty()) {
+                std::cerr << "Error: --generate requires --tokenizer <path>\n";
+                return 1;
+            }
+
+            LOG_INFO("\n=== Autoregressive Generation Mode ===");
+            LOG_INFO("Input prompt: \"", user_input_text, "\"");
+            LOG_INFO("Max tokens: ", max_tokens);
+            LOG_INFO("Temperature: ", temperature);
+
+            // Create generator
+            GpuExecutor executor(use_cpu);
+            executor.setVerbose(verbose);
+
+            AutoregressiveGenerator::GenerationConfig gen_config;
+            gen_config.max_tokens = max_tokens;
+            gen_config.temperature = temperature;
+            gen_config.verbose = verbose;
+
+            AutoregressiveGenerator generator(executor, *graph, tokenizer_path, gen_config);
+
+            // Generate text
+            std::string generated_text = generator.generate(user_input_text);
+
+            // Display result
+            LOG_INFO("\n=== Generated Text ===");
+            std::cout << generated_text << "\n";
+
+            LOG_INFO("\n=== Generation Complete ===");
+            return 0;
+        }
 
         // Step 3: Prepare actual input tensors
         std::map<std::string, std::shared_ptr<Tensor>> inputs;
@@ -332,17 +429,66 @@ int main(int argc, char** argv) {
             printTensorSample("Output " + name, *tensor);
         }
 
-        // Try to decode output if it looks like token IDs
-        if (outputs.count("output_ids") && !tokenizer_path.empty()) {
-            auto ids = outputs["output_ids"];
-            const int64_t* data = ids->data<int64_t>();
-            std::vector<int64_t> token_ids(data, data + ids->size());
-            
-            try {
+        // Try to decode output if it looks like token IDs or logits
+        if (!tokenizer_path.empty()) {
+            std::vector<int64_t> token_ids;
+
+            if (outputs.count("output_ids")) {
+                // Direct token IDs output
+                auto ids = outputs["output_ids"];
+                const int64_t* data = ids->data<int64_t>();
+                token_ids = std::vector<int64_t>(data, data + ids->size());
+            } else if (outputs.count("logits")) {
+                // Convert logits to token IDs (argmax along vocab dimension)
+                auto logits = outputs["logits"];
+                const float* logits_data = logits->data<float>();
+                auto shape = logits->shape();
+
+                if (shape.size() >= 2) {
+                    // Shape is typically [batch_size, seq_len, vocab_size]
+                    int seq_len = shape.size() == 3 ? shape[1] : 1;
+                    int vocab_size = shape[shape.size() - 1];
+
+                    LOG_INFO("Decoding logits: seq_len=", seq_len, ", vocab_size=", vocab_size);
+
+                    for (int i = 0; i < seq_len; ++i) {
+                        const float* seq_logits = logits_data + i * vocab_size;
+
+                        // Find argmax
+                        int max_idx = 0;
+                        float max_val = seq_logits[0];
+                        for (int j = 1; j < vocab_size; ++j) {
+                            if (seq_logits[j] > max_val) {
+                                max_val = seq_logits[j];
+                                max_idx = j;
+                            }
+                        }
+                        token_ids.push_back(max_idx);
+                    }
+
+                    // Print token IDs
+                    std::cout << "Decoded Token IDs: [";
+                    for (size_t i = 0; i < std::min(size_t(20), token_ids.size()); ++i) {
+                        std::cout << token_ids[i];
+                        if (i < std::min(size_t(20), token_ids.size()) - 1) std::cout << ", ";
+                    }
+                    if (token_ids.size() > 20) std::cout << ", ...";
+                    std::cout << "]\n";
+                }
+            }
+
+            // Decode token IDs to text
+            if (!token_ids.empty()) {
                 std::string decoded_text = decodeTokens(token_ids, tokenizer_path);
-                LOG_INFO("Generated text: ", decoded_text);
-            } catch (const std::exception& e) {
-                LOG_WARN("Could not decode output tokens: ", e.what());
+
+                if (!decoded_text.empty()) {
+                    // Successful decode
+                    LOG_INFO("\n=== Generated Text ===");
+                    std::cout << decoded_text << "\n";
+                } else {
+                    // Decoding failed
+                    LOG_WARN("\n[Tokenizer] Failed to decode output tokens");
+                }
             }
         }
 

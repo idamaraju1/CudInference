@@ -112,6 +112,9 @@ private:
     // Helper: get or create a tensor
     std::shared_ptr<Tensor> getTensor(const std::string& name);
 
+    // Helper: check if a tensor exists
+    bool hasTensor(const std::string& name) const;
+
     // Helper: allocate output tensor based on operation
     std::shared_ptr<Tensor> allocateOutput(const std::vector<int64_t>& shape,
                                            DataType dtype = DataType::FLOAT32);

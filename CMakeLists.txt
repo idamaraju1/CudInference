@@ -33,21 +33,6 @@ add_library(onnx_proto ${ONNX_PROTO_SOURCES})
 target_include_directories(onnx_proto PUBLIC ${ONNX_PROTO_DIR})
 target_link_libraries(onnx_proto PUBLIC protobuf::libprotobuf)
 
-# SentencePiece setup
-set(SENTENCEPIECE_DIR ${CMAKE_SOURCE_DIR}/third_party/sentencepiece)
-set(SENTENCEPIECE_INCLUDE_DIR ${SENTENCEPIECE_DIR}/src)
-set(SENTENCEPIECE_LIB_DIR ${SENTENCEPIECE_DIR}/build/src)
-
-# Find SentencePiece library
-find_library(SENTENCEPIECE_LIB
-    NAMES sentencepiece libsentencepiece
-    PATHS ${SENTENCEPIECE_LIB_DIR}
-    NO_DEFAULT_PATH
-)
-
-if(NOT SENTENCEPIECE_LIB)
-    message(WARNING "SentencePiece library not found. Run scripts/setup_third_party_libs.sh first.")
-endif()
 
 # Source files
 set(CORE_SOURCES
@@ -64,6 +49,7 @@ set(UTILS_SOURCES
 set(GPU_SOURCES
     src/gpu/gpu_executor.cpp
     src/gpu/benchmark.cpp
+    src/gpu/autoregressive_generator.cpp
 )
 
 set(CUDA_SOURCES
@@ -90,7 +76,6 @@ add_executable(onnx_gpu_engine
 target_include_directories(onnx_gpu_engine PRIVATE
     ${CMAKE_SOURCE_DIR}/src
     ${ONNX_PROTO_DIR}
-    ${SENTENCEPIECE_INCLUDE_DIR}
 )
 
 target_link_libraries(onnx_gpu_engine PRIVATE
@@ -100,11 +85,6 @@ target_link_libraries(onnx_gpu_engine PRIVATE
     OpenMP::OpenMP_CXX
     /lib/x86_64-linux-gnu/libstdc++.so.6
 )
-
-# Link SentencePiece if found
-if(SENTENCEPIECE_LIB)
-    target_link_libraries(onnx_gpu_engine PRIVATE ${SENTENCEPIECE_LIB})
-endif()
 
 # Compiler options
 target_compile_options(onnx_gpu_engine PRIVATE

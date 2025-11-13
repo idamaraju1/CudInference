@@ -22,6 +22,7 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
         if (idx >= inputs.size()) return nullptr;
         const auto& name = inputs[idx];
         if (name.empty()) return nullptr;
+        if (!hasTensor(name)) return nullptr;  // Handle missing optional tensors
         return getTensor(name);
     };
 

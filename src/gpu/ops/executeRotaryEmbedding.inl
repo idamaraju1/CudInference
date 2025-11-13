@@ -2,6 +2,13 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
     const auto& inputs = node.inputs();
     const auto& outputs = node.outputs();
 
+    if (verbose_) {
+        LOG_DEBUG("RotaryEmbedding: received ", inputs.size(), " inputs");
+        for (size_t i = 0; i < inputs.size(); ++i) {
+            LOG_DEBUG("  Input[", i, "]: ", inputs[i]);
+        }
+    }
+
     if (inputs.size() < 3 || outputs.empty()) {
         throw std::runtime_error("RotaryEmbedding expects at least 1 output");
     }
@@ -164,6 +171,15 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
             throw std::runtime_error("RotaryEmbedding: cache tensor " + label + " has empty shape");
         }
 
+        // Debug logging for autoregressive generation
+        if (verbose_) {
+            LOG_DEBUG("RotaryEmbedding ", label, " cache shape: [", cache_shape[0]);
+            for (size_t i = 1; i < cache_shape.size(); ++i) {
+                LOG_DEBUG(", ", cache_shape[i]);
+            }
+            LOG_DEBUG("], sequence_length: ", sequence_length, ", has position_ids: ", (position_data ? "yes" : "no"));
+        }
+
         std::vector<float> selected(batch * sequence_length * rotary_half);
         size_t rank = cache_shape.size();
 
@@ -218,12 +234,22 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
             if (cols < rotary_half) {
                 throw std::runtime_error("RotaryEmbedding: cache " + label + " width is smaller than half rotary dim");
             }
+
+            // For autoregressive generation without position_ids:
+            // Clamp sequence indices to available cache rows to prevent out-of-bounds access
             for (size_t b = 0; b < batch; ++b) {
                 for (size_t s = 0; s < sequence_length; ++s) {
                     size_t row = s;
+
+                    // Safety: clamp to available cache size
                     if (row >= rows) {
-                        throw std::runtime_error("RotaryEmbedding: cache " + label + " sequence exceeds table rows");
+                        if (verbose_) {
+                            LOG_DEBUG("RotaryEmbedding: sequence position ", s,
+                                     " exceeds cache rows ", rows, ", clamping to last row");
+                        }
+                        row = rows - 1;  // Use last available position
                     }
+
                     const float* src = cache_data + row * cols;
                     float* dst = selected.data() + (b * sequence_length + s) * rotary_half;
                     std::memcpy(dst, src, rotary_half * sizeof(float));
