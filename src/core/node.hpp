@@ -5,10 +5,9 @@
 #include <map>
 #include <memory>
 
-namespace onnx_runner {
+#include "utils/tensor.hpp"
 
-// Forward declaration
-class Tensor;
+namespace onnx_runner {
 
 // Supported operation types
 enum class OpType {

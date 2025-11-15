@@ -2,7 +2,7 @@
 
 #include "../core/graph.hpp"
 #include "../utils/tensor.hpp"
-#include "gpu_executor.hpp"
+#include "../executors/executor.hpp"
 #include <string>
 #include <vector>
 #include <memory>
@@ -36,7 +36,7 @@ public:
      * @param tokenizer_path Path to tokenizer file for encoding/decoding
      * @param config Generation configuration
      */
-    AutoregressiveGenerator(GpuExecutor& executor,
+    AutoregressiveGenerator(Executor& executor,
                            const Graph& graph,
                            const std::string& tokenizer_path,
                            const GenerationConfig& config);
@@ -56,7 +56,7 @@ public:
     std::vector<int64_t> generateTokens(const std::vector<int64_t>& prompt_token_ids);
 
 private:
-    GpuExecutor& executor_;
+    Executor& executor_;
     const Graph& graph_;
     std::string tokenizer_path_;
     GenerationConfig config_;

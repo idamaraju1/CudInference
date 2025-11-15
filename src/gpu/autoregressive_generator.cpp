@@ -8,11 +8,12 @@
 #include <cstdio>
 #include <stdexcept>
 #include <chrono>
+#include <cstring>
 
 namespace onnx_runner {
 
 AutoregressiveGenerator::AutoregressiveGenerator(
-    GpuExecutor& executor,
+    Executor& executor,
     const Graph& graph,
     const std::string& tokenizer_path,
     const GenerationConfig& config)
@@ -225,7 +226,7 @@ std::string AutoregressiveGenerator::decode(const std::vector<int64_t>& token_id
 }
 
 int64_t AutoregressiveGenerator::sampleNextToken(const Tensor& logits) {
-    const float* logits_data = logits.data<float>();
+    const float* logits_data = logits.data_ptr<float>();
     int vocab_size = static_cast<int>(logits.size());
 
     if (vocab_size == 0) {
@@ -333,9 +334,9 @@ AutoregressiveGenerator::createInputTensors(const std::vector<int64_t>& token_id
 
     // Create input_ids tensor [1, seq_len]
     if (std::find(graph_inputs.begin(), graph_inputs.end(), "input_ids") != graph_inputs.end()) {
-        auto input_ids = std::make_shared<Tensor>(
+        auto input_ids = std::make_shared<CpuTensor>(
             std::vector<int64_t>{1, seq_len}, DataType::INT64);
-        std::memcpy(input_ids->data<int64_t>(), token_ids.data(),
+        std::memcpy(input_ids->data_ptr<int64_t>(), token_ids.data(),
                     token_ids.size() * sizeof(int64_t));
         inputs["input_ids"] = input_ids;
         if (config_.verbose) {
@@ -345,9 +346,9 @@ AutoregressiveGenerator::createInputTensors(const std::vector<int64_t>& token_id
 
     // Create attention_mask tensor [1, seq_len] - all ones
     if (std::find(graph_inputs.begin(), graph_inputs.end(), "attention_mask") != graph_inputs.end()) {
-        auto attention_mask = std::make_shared<Tensor>(
+        auto attention_mask = std::make_shared<CpuTensor>(
             std::vector<int64_t>{1, seq_len}, DataType::INT64);
-        int64_t* mask_data = attention_mask->data<int64_t>();
+        int64_t* mask_data = attention_mask->data_ptr<int64_t>();
         for (int64_t i = 0; i < seq_len; ++i) {
             mask_data[i] = 1;
         }
@@ -359,9 +360,9 @@ AutoregressiveGenerator::createInputTensors(const std::vector<int64_t>& token_id
 
     // Create position_ids tensor [1, seq_len] - sequential positions [0, 1, 2, ..., seq_len-1]
     if (std::find(graph_inputs.begin(), graph_inputs.end(), "position_ids") != graph_inputs.end()) {
-        auto position_ids = std::make_shared<Tensor>(
+        auto position_ids = std::make_shared<CpuTensor>(
             std::vector<int64_t>{1, seq_len}, DataType::INT64);
-        int64_t* pos_data = position_ids->data<int64_t>();
+        int64_t* pos_data = position_ids->data_ptr<int64_t>();
         for (int64_t i = 0; i < seq_len; ++i) {
             pos_data[i] = i;
         }
@@ -399,13 +400,13 @@ std::shared_ptr<Tensor> AutoregressiveGenerator::extractNextTokenLogits(
 
         // Extract logits for the last position
         // We want logits[0, seq_len-1, :] which is the prediction for the next token
-        const float* all_logits = logits_tensor->data<float>();
+        const float* all_logits = logits_tensor->data_ptr<float>();
         const float* last_position_logits = all_logits + (seq_len - 1) * vocab_size;
 
         // Create a new tensor for just the last position
-        auto next_token_logits = std::make_shared<Tensor>(
+        auto next_token_logits = std::make_shared<CpuTensor>(
             std::vector<int64_t>{vocab_size}, DataType::FLOAT32);
-        std::memcpy(next_token_logits->data<float>(), last_position_logits,
+        std::memcpy(next_token_logits->data_ptr<float>(), last_position_logits,
                     vocab_size * sizeof(float));
 
         return next_token_logits;

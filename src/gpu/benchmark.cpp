@@ -1,5 +1,10 @@
 #include "benchmark.hpp"
-#include "gpu_executor.hpp"
+#include "../executors/cpu_executor.hpp"
+
+#ifndef USE_CPU
+#include "../executors/gpu_executor.hpp"
+#endif
+
 #include "../utils/logger.hpp"
 #include <iostream>
 #include <iomanip>
@@ -275,7 +280,8 @@ BenchmarkExecutor::runBenchmark(const Graph& graph,
                       << ")..." << colors::RESET << "\n\n";
         }
 
-        GpuExecutor cpu_executor(true, num_threads);
+        // TODO - add multiple threads and such
+        CpuExecutor cpu_executor();
         cpu_executor.setVerbose(false);
 
         // Create inputs for this run

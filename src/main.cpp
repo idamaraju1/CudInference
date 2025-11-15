@@ -1,10 +1,5 @@
-#include "core/model_parser.hpp"
-#include "core/graph.hpp"
-#include "gpu/gpu_executor.hpp"
-#include "gpu/benchmark.hpp"
-#include "gpu/autoregressive_generator.hpp"
-#include "utils/logger.hpp"
-#include "utils/tensor.hpp"
+#define USE_CPU // Temporary definition for compile-time flag
+
 #include <iostream>
 #include <memory>
 #include <chrono>
@@ -13,18 +8,31 @@
 #include <array>
 #include <cstdio>
 
+#include "core/model_parser.hpp"
+#include "core/graph.hpp"
+#include "gpu/benchmark.hpp"
+#include "gpu/autoregressive_generator.hpp"
+#include "utils/logger.hpp"
+#include "utils/tensor/tensor_base.hpp"
+#include "utils/tensor/cpu_tensor.hpp"
+
+#include "executors/executor.hpp"
+#include "executors/cpu_executor.hpp"
+#ifndef USE_CPU
+#include "executors/gpu_executor.hpp"
+#include "utils/tensor/gpu_tensor.hpp"
+#endif
 
 using namespace onnx_runner;
 
 void printUsage(const char* program_name) {
     std::cout << "Usage: " << program_name << " <model.onnx> [options]\n";
     std::cout << "Options:\n";
-    std::cout << "  --cpu             Use CPU fallback instead of GPU\n";
     std::cout << "  --cpu-threads N   Max CPU threads for benchmark mode (default: auto-detect)\n";
     std::cout << "                    Benchmark will test 1 to N threads\n";
     std::cout << "  --verbose         Print detailed timing information\n";
     std::cout << "  --debug           Enable debug logging\n";
-    std::cout << "  --benchmark       Run multi-configuration benchmark (CPU 1-N threads + GPU)\n";
+    std::cout << "  --benchmark       Run multi-configuration benchmark\n";
     std::cout << "  --output FILE     Save benchmark results to JSON file (default: results.json)\n";
     std::cout << "  --input TEXT      Input text to tokenize\n";
     std::cout << "  --tokenizer FILE  Path to tokenizer.json file\n";
@@ -35,14 +43,13 @@ void printUsage(const char* program_name) {
 }
 
 // Helper to create a simple test input tensor
-std::shared_ptr<Tensor> createTestInput(const std::vector<int64_t>& shape) {
-    auto tensor = std::make_shared<Tensor>(shape, DataType::FLOAT32);
-
-    // Fill with simple test data (e.g., sequential values)
-    float* data = tensor->data<float>();
-    for (size_t i = 0; i < tensor->size(); ++i) {
-        data[i] = static_cast<float>(i % 100) / 100.0f;
-    }
+std::shared_ptr<TensorBase> createTestInput(const std::vector<int64_t>& shape) {
+    #ifdef USE_CPU
+        auto tensor = std::make_shared<CpuTensor>(shape, DataType::FLOAT32);
+        tensor->fill(0.5f);  // Fill with constant value for testing
+    #else
+        auto tensor = std::make_shared<GpuTensor>(shape, DataType::FLOAT32);
+    #endif
 
     return tensor;
 }
@@ -132,10 +139,10 @@ std::string decodeTokens(const std::vector<int64_t>& token_ids, const std::strin
 }
 
 // Print first few values of a tensor for debugging
-void printTensorSample(const std::string& name, const Tensor& tensor, int max_values = 10) {
+void printTensorSample(const std::string& name, const TensorBase& tensor, int max_values = 10) {
     std::cout << name << " " << tensor.shapeStr() << ": [";
 
-    const float* data = tensor.data<float>();
+    const float* data = tensor.data_ptr<float>();
     int count = std::min(static_cast<int>(tensor.size()), max_values);
 
     for (int i = 0; i < count; ++i) {
@@ -158,7 +165,6 @@ int main(int argc, char** argv) {
     }
 
     std::string model_path;
-    bool use_cpu = false;
     bool verbose = false;
     bool debug = false;
     bool benchmark = false;
@@ -172,9 +178,7 @@ int main(int argc, char** argv) {
 
     for (int i = 1; i < argc; ++i) {
         std::string arg = argv[i];
-        if (arg == "--cpu") {
-            use_cpu = true;
-        } else if (arg == "--cpu-threads") {
+        if (arg == "--cpu-threads") {
             if (i + 1 < argc) {
                 cpu_threads = std::atoi(argv[++i]);
                 if (cpu_threads < 1) {
@@ -255,9 +259,8 @@ int main(int argc, char** argv) {
         Logger::instance().setLevel(LogLevel::DEBUG);
     }
 
-    LOG_INFO("=== OnnxRunner GPU Engine ===");
+    LOG_INFO("=== OnnxRunner Engine ===");
     LOG_INFO("Model: ", model_path);
-    LOG_INFO("Device: ", use_cpu ? "CPU" : "GPU");
 
     try {
         // Step 1: Parse the model
@@ -292,7 +295,11 @@ int main(int argc, char** argv) {
             LOG_INFO("Temperature: ", temperature);
 
             // Create generator
-            GpuExecutor executor(use_cpu);
+            #ifdef USE_CPU
+                CpuExecutor executor;
+            #else
+                GpuExecutor executor;
+            #endif
             executor.setVerbose(verbose);
 
             AutoregressiveGenerator::GenerationConfig gen_config;
@@ -314,7 +321,7 @@ int main(int argc, char** argv) {
         }
 
         // Step 3: Prepare actual input tensors
-        std::map<std::string, std::shared_ptr<Tensor>> inputs;
+        std::map<std::string, std::shared_ptr<TensorBase>> inputs;
 
         if (graph->inputs().empty()) {
             LOG_WARN("No graph inputs defined - graph might be self-contained");
@@ -337,9 +344,14 @@ int main(int argc, char** argv) {
                     
                     auto token_ids = tokenizeText(user_input_text, tokenizer_path);
                     shape = {1, static_cast<int64_t>(token_ids.size())};
-                    auto tensor = std::make_shared<Tensor>(shape, DataType::INT64);
-                    std::memcpy(tensor->data<int64_t>(), token_ids.data(),
-                                token_ids.size() * sizeof(int64_t));
+                    #ifdef USE_CPU
+                        auto tensor = std::make_shared<CpuTensor>(shape, DataType::INT64);
+                    #else
+                        auto tensor = std::make_shared<GpuTensor>(shape, DataType::INT64);
+                    #endif
+                    // TODO
+                    // std::memcpy(tensor->data<int64_t>(), token_ids.data(),
+                    //             token_ids.size() * sizeof(int64_t));
                     inputs[input_name] = tensor;
 
                     LOG_INFO("Tokenized input text: '", user_input_text, "'");
@@ -363,9 +375,13 @@ int main(int argc, char** argv) {
                     auto token_ids = tokenizeText(user_input_text, tokenizer_path);
                     std::vector<int64_t> mask(token_ids.size(), 1);
                     shape = {1, static_cast<int64_t>(mask.size())};
-                    auto tensor = std::make_shared<Tensor>(shape, DataType::INT64);
-                    std::memcpy(tensor->data<int64_t>(), mask.data(),
-                                mask.size() * sizeof(int64_t));
+                    #ifdef USE_CPU
+                        auto tensor = std::make_shared<CpuTensor>(shape, DataType::INT64);
+                    #else
+                        auto tensor = std::make_shared<GpuTensor>(shape, DataType::INT64);
+                    #endif
+                    // std::memcpy(tensor->data<int64_t>(), mask.data(),
+                    //             mask.size() * sizeof(int64_t));
                     inputs[input_name] = tensor;
 
                 } else {
@@ -376,31 +392,36 @@ int main(int argc, char** argv) {
         }
 
         // Step 4: Execute the graph
-        std::map<std::string, std::shared_ptr<Tensor>> outputs;
+        std::map<std::string, std::shared_ptr<TensorBase>> outputs;
         BenchmarkResults bench_results;
 
         if (benchmark) {
-            // Run benchmark mode
-            BenchmarkExecutor bench_executor(cpu_threads);
-            auto [results, bench_outputs] = bench_executor.runBenchmark(*graph, inputs, true);
-            outputs = bench_outputs;
-            bench_results = results;
+            // TODO: benchmark requires GPU
+            // // Run benchmark mode
+            // BenchmarkExecutor bench_executor(cpu_threads);
+            // auto [results, bench_outputs] = bench_executor.runBenchmark(*graph, inputs, true);
+            // outputs = bench_outputs;
+            // bench_results = results;
 
-            // Save to JSON (default to results.json if not specified)
-            std::string json_output = output_file.empty() ? "results.json" : output_file;
-            std::ofstream out(json_output);
-            if (out.is_open()) {
-                out << bench_results.toJSON();
-                out.close();
-                LOG_INFO("Benchmark results saved to: ", json_output);
-            } else {
-                LOG_ERROR("Failed to open output file: ", json_output);
-            }
+            // // Save to JSON (default to results.json if not specified)
+            // std::string json_output = output_file.empty() ? "results.json" : output_file;
+            // std::ofstream out(json_output);
+            // if (out.is_open()) {
+            //     out << bench_results.toJSON();
+            //     out.close();
+            //     LOG_INFO("Benchmark results saved to: ", json_output);
+            // } else {
+            //     LOG_ERROR("Failed to open output file: ", json_output);
+            // }
         } else {
             // Normal execution mode
             LOG_INFO("\n=== Executing Graph ===");
 
-            GpuExecutor executor(use_cpu);
+            #ifdef USE_CPU
+                CpuExecutor executor;
+            #else
+                GpuExecutor executor;
+            #endif
             executor.setVerbose(verbose);
 
             auto exec_start = std::chrono::high_resolution_clock::now();
@@ -436,12 +457,12 @@ int main(int argc, char** argv) {
             if (outputs.count("output_ids")) {
                 // Direct token IDs output
                 auto ids = outputs["output_ids"];
-                const int64_t* data = ids->data<int64_t>();
+                const int64_t* data = ids->data_ptr<int64_t>();
                 token_ids = std::vector<int64_t>(data, data + ids->size());
             } else if (outputs.count("logits")) {
                 // Convert logits to token IDs (argmax along vocab dimension)
                 auto logits = outputs["logits"];
-                const float* logits_data = logits->data<float>();
+                const float* logits_data = logits->data_ptr<float>();
                 auto shape = logits->shape();
 
                 if (shape.size() >= 2) {

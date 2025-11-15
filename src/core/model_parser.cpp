@@ -3,6 +3,7 @@
 #include "onnx.pb.h"
 #include <fstream>
 #include <stdexcept>
+#include <cstring>
 
 namespace onnx_runner {
 
@@ -14,10 +15,14 @@ std::shared_ptr<Graph> ModelParser::parse(const std::string& model_path) {
     if (!input) {
         throw std::runtime_error("Failed to open model file: " + model_path);
     }
-
-    // Parse the protobuf
+    
+    // Read the entire file into a string buffer
+    std::string buffer((std::istreambuf_iterator<char>(input)),
+                       std::istreambuf_iterator<char>());
+    
+    // Parse the protobuf from string
     onnx::ModelProto model;
-    if (!model.ParseFromIstream(&input)) {
+    if (!model.ParseFromString(buffer)) {
         throw std::runtime_error("Failed to parse ONNX model");
     }
 
@@ -86,10 +91,12 @@ std::shared_ptr<Graph> ModelParser::parse(const std::string& model_path) {
 
             if (!shape.empty()) {
                 graph->addInput(name, shape);
-                LOG_DEBUG("  Input: ", name, " shape: ", Tensor(shape).shapeStr());
+                // TODO
+                // LOG_DEBUG("  Input: ", name, " shape: ", Tensor(shape).shapeStr());
             } else {
                 graph->addInput(name);
-                LOG_DEBUG("  Input: ", name, " (no shape info)");
+                // TODO
+                // LOG_DEBUG("  Input: ", name, " (no shape info)");
             }
         }
     }
@@ -213,12 +220,12 @@ std::shared_ptr<Tensor> ModelParser::parseTensorProto(const void* proto_ptr) {
     DataType dtype = onnxDataTypeToDataType(tensor_proto->data_type());
 
     // Create tensor
-    auto tensor = std::make_shared<Tensor>(shape, dtype);
+    auto tensor = std::make_shared<CpuTensor>(shape, dtype);
 
     // Extract data
     // ONNX can store data in multiple formats - we handle the most common ones
     if (dtype == DataType::FLOAT32) {
-        float* data = tensor->data<float>();
+        float* data = tensor->data_ptr<float>();
         size_t size = tensor->size();
 
         LOG_DEBUG("    float_data_size=", tensor_proto->float_data_size(),
@@ -242,7 +249,7 @@ std::shared_ptr<Tensor> ModelParser::parseTensorProto(const void* proto_ptr) {
             LOG_DEBUG("    No data found!");
         }
     } else if (dtype == DataType::INT64) {
-        int64_t* data = tensor->data<int64_t>();
+        int64_t* data = tensor->data_ptr<int64_t>();
         size_t size = tensor->size();
 
         if (tensor_proto->int64_data_size() > 0) {
@@ -275,7 +282,8 @@ std::shared_ptr<Tensor> ModelParser::parseSparseTensorProto(const void* proto_pt
         total_size *= dim;
     }
 
-    LOG_DEBUG("  Sparse tensor shape: ", Tensor(shape).shapeStr(), ", total elements: ", total_size);
+    // TODO
+    // LOG_DEBUG("  Sparse tensor shape: ", Tensor(shape).shapeStr(), ", total elements: ", total_size);
 
     // Parse the values tensor (contains NNZ non-zero elements)
     if (!sparse_proto->has_values()) {
@@ -300,12 +308,13 @@ std::shared_ptr<Tensor> ModelParser::parseSparseTensorProto(const void* proto_pt
     }
 
     // Create dense tensor filled with zeros
-    auto dense_tensor = std::make_shared<Tensor>(shape, dtype);
-    float* dense_data = dense_tensor->data<float>();
+    auto dense_tensor = std::make_shared<CpuTensor>(shape, dtype);
+    float* dense_data = dense_tensor->data_ptr<float>();
+
     std::memset(dense_data, 0, total_size * sizeof(float));
 
     // Get values data
-    const float* values_data = values_tensor->data<float>();
+    const float* values_data = values_tensor->data_ptr<float>();
 
     // Determine index format and populate dense tensor
     const auto& indices_shape = indices_tensor->shape();
@@ -320,7 +329,7 @@ std::shared_ptr<Tensor> ModelParser::parseSparseTensorProto(const void* proto_pt
             throw std::runtime_error("Sparse tensor rank mismatch");
         }
 
-        const int64_t* indices_data = indices_tensor->data<int64_t>();
+        const int64_t* indices_data = indices_tensor->data_ptr<int64_t>();
 
         for (int64_t i = 0; i < nnz; ++i) {
             // Compute linear index from multi-dimensional index
@@ -342,7 +351,7 @@ std::shared_ptr<Tensor> ModelParser::parseSparseTensorProto(const void* proto_pt
         // 1D linearized indices format: [NNZ]
         LOG_DEBUG("  Using 1D linearized indices format: [", nnz, "]");
 
-        const int64_t* indices_data = indices_tensor->data<int64_t>();
+        const int64_t* indices_data = indices_tensor->data_ptr<int64_t>();
 
         for (int64_t i = 0; i < nnz; ++i) {
             int64_t linear_idx = indices_data[i];
