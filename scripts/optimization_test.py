@@ -1,4 +1,3 @@
-#!/usr/bin/env python3
 """
 Author: Chris V
 Benchmark GPU baseline vs GPU optimized (multi-threaded) ONNX parsing/execution.
@@ -16,6 +15,8 @@ Feel free to extend this if you add any other optimized section of the pipeline,
 I only changed the parser for now so that is what this tests. -Chris
 """
 
+#!/usr/bin/env python3
+
 import torch
 import torch.nn as nn
 import numpy as np
@@ -26,11 +27,11 @@ import subprocess
 
 # config
 BASELINE_GPU_BIN = "./build/onnx_gpu_engine"       # baseline parser
-OPTIMIZED_GPU_BIN = "./build/onnx_gpu_engine"   # multi-threaded parser
+OPTIMIZED_GPU_BIN = "./build/onnx_gpu_engine"      # multi-threaded parser (same binary, different flag)
 
 
 # ---------------------------------------------------------------------
-# Model definition and export (adapted from `create_large_models.py`
+# Model definition and export
 # ---------------------------------------------------------------------
 class DeepMLP(nn.Module):
     """Deep Multi-Layer Perceptron with configurable depth and width"""
@@ -111,16 +112,18 @@ def export_model(model, model_name, input_shape):
     return onnx_file
 
 
+# ---------------------------------------------------------------------
 # benchmark helpers
-def extract_time_ms(process_output):
+# ---------------------------------------------------------------------
+def extract_parse_time_ms(process_output):
     """
-    Extract a time in milliseconds from lines like:
-        "Graph execution took XXX ms"
+    Extract parsing time in milliseconds from lines like:
+        "Model parsing took XXX ms"
     Returns float or None.
     """
     for line in process_output.splitlines():
-        if "Graph execution took" in line:
-            # e.g., "Graph execution took 12.34 ms"
+        if "Model parsing took" in line:
+            # e.g., "Model parsing took 12.34 ms"
             parts = line.split("took", 1)[1].strip().split()
             # parts[0] should be the numeric value
             try:
@@ -154,47 +157,50 @@ def run_engine(binary, onnx_file, extra_args=None):
 
 def benchmark_parsers(onnx_file):
     """
-    Benchmark baseline GPU vs optimized GPU parser for a single model file.
-    Returns (baseline_ms, optimized_ms).
+    Benchmark baseline vs optimized parser for a single model file.
+    Returns (baseline_parse_ms, optimized_parse_ms).
     """
     print(f"\n{'─'*60}")
     print(f"Benchmarking parsers for: {onnx_file}")
     print(f"{'─'*60}")
 
-    # Baseline GPU
-    print("\n🧱 Baseline GPU (single-threaded parser)...")
+    # Baseline parser
+    print("\n🧱 Baseline (single-threaded parser)...")
     stdout_base, _ = run_engine(BASELINE_GPU_BIN, onnx_file, extra_args=["--verbose"])
-    baseline_ms = extract_time_ms(stdout_base)
+    baseline_ms = extract_parse_time_ms(stdout_base)
     if baseline_ms is not None:
-        print(f"  Baseline total time: {baseline_ms:.3f} ms")
+        print(f"  Baseline parse time: {baseline_ms:.3f} ms")
     else:
-        print("  ⚠️ Could not find timing line for baseline.")
+        print("  ⚠️ Could not find parsing time for baseline.")
 
-    # Optimized GPU
-    print("\n⚙️  Optimized GPU (multi-threaded parser)...")
-    stdout_opt, _ = run_engine(OPTIMIZED_GPU_BIN, onnx_file, extra_args=["--verbose", "--mt-parser"])
-    optimized_ms = extract_time_ms(stdout_opt)
+    # Optimized parser
+    print("\n⚙️  Optimized (multi-threaded parser)...")
+    stdout_opt, _ = run_engine(OPTIMIZED_GPU_BIN, onnx_file,
+                               extra_args=["--verbose", "--mt-parser"])
+    optimized_ms = extract_parse_time_ms(stdout_opt)
     if optimized_ms is not None:
-        print(f"  Optimized total time: {optimized_ms:.3f} ms")
+        print(f"  Optimized parse time: {optimized_ms:.3f} ms")
     else:
-        print("  ⚠️ Could not find timing line for optimized.")
+        print("  ⚠️ Could not find parsing time for optimized.")
 
-    # Speedup
+    # Speedup (parser-only)
     if baseline_ms is not None and optimized_ms is not None:
         if optimized_ms > 0:
             speedup = baseline_ms / optimized_ms
-            print(f"\n  ⚡ Speedup from parser optimization: {speedup:.2f}x "
-                  f"(optimized is {speedup:.2f}x faster overall)")
+            print(f"\n  ⚡ Parser speedup: {speedup:.2f}x "
+                  f"(optimized parser is {speedup:.2f}x faster)")
         else:
-            print("\n  ⚠️ Optimized time is zero or invalid; cannot compute speedup.")
+            print("\n  ⚠️ Optimized parse time is zero or invalid; cannot compute speedup.")
 
     return baseline_ms, optimized_ms
 
 
-# driver: create models and benchmark.
+# ---------------------------------------------------------------------
+# driver: create models and benchmark parsers only
+# ---------------------------------------------------------------------
 def main():
     print("="*60)
-    print("GPU Baseline vs Optimized Parser Benchmark")
+    print("Baseline vs Optimized ONNX Parser Benchmark (parse time only)")
     print("="*60)
     print("\nCreating progressively larger models (MLP: Linear + ReLU)...")
 
@@ -229,7 +235,7 @@ def main():
 
     # Run parser benchmarks
     print("\n" + "="*60)
-    print("Running GPU baseline vs optimized parser benchmarks...")
+    print("Running baseline vs optimized parser benchmarks (parse time only)...")
     print("="*60)
 
     results = []
@@ -243,7 +249,7 @@ def main():
 
     # Summary
     print("\n" + "="*60)
-    print("Summary: Baseline vs Optimized (GPU)")
+    print("Summary: Baseline vs Optimized Parser (parse time)")
     print("="*60)
 
     for onnx_file, base, opt in results:
@@ -251,14 +257,14 @@ def main():
         if base is not None and opt is not None and opt > 0:
             speedup = base / opt
             print(f"  {onnx_file:20} ({size_mb:6.2f} MB)  "
-                  f"baseline={base:8.3f} ms  optimized={opt:8.3f} ms  "
+                  f"baseline_parse={base:8.3f} ms  optimized_parse={opt:8.3f} ms  "
                   f"speedup={speedup:5.2f}x")
         else:
-            print(f"  {onnx_file:20} ({size_mb:6.2f} MB)  timing unavailable")
+            print(f"  {onnx_file:20} ({size_mb:6.2f} MB)  parsing timing unavailable")
 
     print("\nTo run manually:")
-    print(f"  {BASELINE_GPU_BIN} <model.onnx> --verbose        # baseline parser")
-    print(f"  {OPTIMIZED_GPU_BIN} <model.onnx> --verbose       # optimized parser")
+    print(f"  {BASELINE_GPU_BIN} <model.onnx> --verbose              # baseline parser")
+    print(f"  {OPTIMIZED_GPU_BIN} <model.onnx> --verbose --mt-parser  # optimized parser")
 
 
 if __name__ == "__main__":
