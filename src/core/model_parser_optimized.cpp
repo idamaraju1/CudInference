@@ -173,7 +173,7 @@ std::shared_ptr<Graph> ModelParserMultiThreaded::parse(const std::string& model_
     return graph;
 }
 
-DataType ModelParser::onnxDataTypeToDataType(int onnx_type) {
+DataType ModelParserMultiThreaded::onnxDataTypeToDataType(int onnx_type) {
     // ONNX data types from onnx.proto
     switch (onnx_type) {
         case 1:  // FLOAT
@@ -192,7 +192,7 @@ DataType ModelParser::onnxDataTypeToDataType(int onnx_type) {
     }
 }
 
-std::shared_ptr<Tensor> ModelParser::parseTensorProto(const void* proto_ptr) {
+std::shared_ptr<Tensor> ModelParserMultiThreaded::parseTensorProto(const void* proto_ptr) {
     const onnx::TensorProto* tensor_proto = static_cast<const onnx::TensorProto*>(proto_ptr);
 
     // Extract shape
