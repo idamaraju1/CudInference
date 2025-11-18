@@ -251,7 +251,7 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
     }
 
     auto output = std::make_shared<Tensor>(Q->shape(), DataType::FLOAT32);
-    std::memcpy(output->data<float>(), output_data.data(), output_data.size() * sizeof(float));
+    std::memcpy(output->ptr_data<float>(), output_data.data(), output_data.size() * sizeof(float));
 
     auto present_key = std::make_shared<Tensor>(
         std::vector<int64_t>{static_cast<int64_t>(batch),
@@ -259,7 +259,7 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
                              static_cast<int64_t>(total_seq),
                              static_cast<int64_t>(head_dim)},
         DataType::FLOAT32);
-    std::memcpy(present_key->data<float>(), key_storage.data(), key_storage.size() * sizeof(float));
+    std::memcpy(present_key->ptr_data<float>(), key_storage.data(), key_storage.size() * sizeof(float));
 
     auto present_value = std::make_shared<Tensor>(
         std::vector<int64_t>{static_cast<int64_t>(batch),
@@ -267,7 +267,7 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
                              static_cast<int64_t>(total_seq),
                              static_cast<int64_t>(value_head_dim)},
         DataType::FLOAT32);
-    std::memcpy(present_value->data<float>(), value_storage.data(), value_storage.size() * sizeof(float));
+    std::memcpy(present_value->ptr_data<float>(), value_storage.data(), value_storage.size() * sizeof(float));
 
     if (!use_cpu_fallback_) {
         output->toGPU();

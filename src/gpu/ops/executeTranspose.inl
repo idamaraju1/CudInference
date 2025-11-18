@@ -29,7 +29,7 @@ void GpuExecutor::executeTranspose(const Node& node) {
 
     auto output = allocateOutput(output_shape);
 
-    launchTransposeKernel(input->data<float>(), output->data<float>(), input->shape(), perm, use_cpu_fallback_, num_cpu_threads_);
+    launchTransposeKernel(input->ptr_data<float>(), output->ptr_data<float>(), input->shape(), perm, use_cpu_fallback_, num_cpu_threads_);
 
     tensors_[node.outputs()[0]] = output;
 }

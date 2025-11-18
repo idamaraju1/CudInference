@@ -73,7 +73,7 @@ void GpuExecutor::executeConcat(const Node& node) {
     auto concatTyped = [&](auto dummy) {
         using T = decltype(dummy);
         auto output = std::make_shared<Tensor>(output_shape, dtype);
-        T* dst = output->data<T>();
+        T* dst = output->ptr_data<T>();
 
         std::vector<std::vector<uint8_t>> caches(inputs.size());
         std::vector<std::vector<T>> convert_buffers(inputs.size());

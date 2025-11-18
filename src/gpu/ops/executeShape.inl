@@ -11,7 +11,7 @@ void GpuExecutor::executeShape(const Node& node) {
     std::vector<int64_t> output_shape = {static_cast<int64_t>(input_shape.size())};
     auto output = std::make_shared<Tensor>(output_shape, DataType::INT64);
 
-    int64_t* data_ptr = output->data<int64_t>();
+    int64_t* data_ptr = output->ptr_data<int64_t>();
     for (size_t i = 0; i < input_shape.size(); ++i) {
         data_ptr[i] = input_shape[i];
     }

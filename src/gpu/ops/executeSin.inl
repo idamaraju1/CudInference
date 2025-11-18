@@ -11,7 +11,7 @@ void GpuExecutor::executeSin(const Node& node) {
     auto output = std::make_shared<Tensor>(input->shape(), DataType::FLOAT32);
     std::vector<uint8_t> cache;
     const float* src = getHostData<float>(input, cache);
-    float* dst = output->data<float>();
+    float* dst = output->ptr_data<float>();
 
     for (size_t i = 0; i < input->size(); ++i) {
         dst[i] = std::sin(src[i]);

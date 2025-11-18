@@ -354,9 +354,9 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
         if (output->device() == DeviceType::CUDA) {
             output->toCPU();
         }
-        std::memcpy(output->data<float>(), copy_source, bytes);
+        std::memcpy(output->data_ptr<float>(), copy_source, bytes);
     } else {
-        CUDA_CHECK(cudaMemcpy(output->data<float>(), copy_source, bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(output->data_ptr<float>(), copy_source, bytes, cudaMemcpyHostToDevice));
     }
 
     tensors_[outputs[0]] = output;

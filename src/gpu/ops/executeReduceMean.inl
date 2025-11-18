@@ -17,13 +17,13 @@ void GpuExecutor::executeReduceMean(const Node& node) {
         }
         // Check data type and read accordingly
         if (axes_tensor->dtype() == DataType::INT64) {
-            const int64_t* axes_data = axes_tensor->data<int64_t>();
+            const int64_t* axes_data = axes_tensor->ptr_data<int64_t>();
             for (size_t i = 0; i < axes_tensor->size(); ++i) {
                 axes.push_back(axes_data[i]);
             }
         } else {
             // Read as floats (computed tensors) and convert to int64
-            const float* axes_data = axes_tensor->data<float>();
+            const float* axes_data = axes_tensor->ptr_data<float>();
             for (size_t i = 0; i < axes_tensor->size(); ++i) {
                 axes.push_back(static_cast<int64_t>(axes_data[i]));
             }
@@ -69,7 +69,7 @@ void GpuExecutor::executeReduceMean(const Node& node) {
 
     auto output = allocateOutput(output_shape);
 
-    launchReduceMeanKernel(input->data<float>(), output->data<float>(), input->shape(), axes, use_cpu_fallback_, num_cpu_threads_);
+    launchReduceMeanKernel(input->ptr_data<float>(), output->ptr_data<float>(), input->shape(), axes, use_cpu_fallback_, num_cpu_threads_);
 
     tensors_[node.outputs()[0]] = output;
 }

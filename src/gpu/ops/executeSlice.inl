@@ -20,16 +20,16 @@ void GpuExecutor::executeSlice(const Node& node) {
 
         // Read starts and ends
         if (starts_tensor->dtype() == DataType::INT64) {
-            const int64_t* starts_data = starts_tensor->data<int64_t>();
-            const int64_t* ends_data = ends_tensor->data<int64_t>();
+            const int64_t* starts_data = starts_tensor->ptr_data<int64_t>();
+            const int64_t* ends_data = ends_tensor->ptr_data<int64_t>();
             for (size_t i = 0; i < starts_tensor->size(); ++i) {
                 starts.push_back(starts_data[i]);
                 ends.push_back(ends_data[i]);
             }
         } else {
             // Read as floats and convert
-            const float* starts_data = starts_tensor->data<float>();
-            const float* ends_data = ends_tensor->data<float>();
+            const float* starts_data = starts_tensor->ptr_data<float>();
+            const float* ends_data = ends_tensor->ptr_data<float>();
             for (size_t i = 0; i < starts_tensor->size(); ++i) {
                 starts.push_back(static_cast<int64_t>(starts_data[i]));
                 ends.push_back(static_cast<int64_t>(ends_data[i]));
@@ -41,12 +41,12 @@ void GpuExecutor::executeSlice(const Node& node) {
             if (axes_tensor->device() == DeviceType::CUDA) axes_tensor->toCPU();
 
             if (axes_tensor->dtype() == DataType::INT64) {
-                const int64_t* axes_data = axes_tensor->data<int64_t>();
+                const int64_t* axes_data = axes_tensor->ptr_data<int64_t>();
                 for (size_t i = 0; i < axes_tensor->size(); ++i) {
                     axes.push_back(axes_data[i]);
                 }
             } else {
-                const float* axes_data = axes_tensor->data<float>();
+                const float* axes_data = axes_tensor->ptr_data<float>();
                 for (size_t i = 0; i < axes_tensor->size(); ++i) {
                     axes.push_back(static_cast<int64_t>(axes_data[i]));
                 }
@@ -58,12 +58,12 @@ void GpuExecutor::executeSlice(const Node& node) {
             if (steps_tensor->device() == DeviceType::CUDA) steps_tensor->toCPU();
 
             if (steps_tensor->dtype() == DataType::INT64) {
-                const int64_t* steps_data = steps_tensor->data<int64_t>();
+                const int64_t* steps_data = steps_tensor->ptr_data<int64_t>();
                 for (size_t i = 0; i < steps_tensor->size(); ++i) {
                     steps.push_back(steps_data[i]);
                 }
             } else {
-                const float* steps_data = steps_tensor->data<float>();
+                const float* steps_data = steps_tensor->ptr_data<float>();
                 for (size_t i = 0; i < steps_tensor->size(); ++i) {
                     steps.push_back(static_cast<int64_t>(steps_data[i]));
                 }
@@ -117,7 +117,7 @@ void GpuExecutor::executeSlice(const Node& node) {
 
     auto output = allocateOutput(output_shape);
 
-    launchSliceKernel(input->data<float>(), output->data<float>(), input->shape(), full_starts, full_steps, output_shape, use_cpu_fallback_, num_cpu_threads_);
+    launchSliceKernel(input->ptr_data<float>(), output->ptr_data<float>(), input->shape(), full_starts, full_steps, output_shape, use_cpu_fallback_, num_cpu_threads_);
 
     tensors_[node.outputs()[0]] = output;
 }

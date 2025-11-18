@@ -18,7 +18,7 @@ void GpuExecutor::executeReduceSum(const Node& node) {
                 axes.push_back(axis_data[i]);
             }
         } else {
-            const float* axis_data = axes_tensor->data<float>();
+            const float* axis_data = axes_tensor->ptr_data<float>();
             for (size_t i = 0; i < axes_tensor->size(); ++i) {
                 axes.push_back(static_cast<int64_t>(axis_data[i]));
             }
@@ -101,9 +101,9 @@ void GpuExecutor::executeReduceSum(const Node& node) {
     auto output = allocateOutput(output_shape);
     size_t bytes = output_size * sizeof(float);
     if (use_cpu_fallback_) {
-        std::memcpy(output->data<float>(), host_output.data(), bytes);
+        std::memcpy(output->ptr_data<float>(), host_output.data(), bytes);
     } else {
-        CUDA_CHECK(cudaMemcpy(output->data<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(output->ptr_data<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
     }
 
     tensors_[node.outputs()[0]] = output;

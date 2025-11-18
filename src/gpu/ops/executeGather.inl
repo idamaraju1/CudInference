@@ -108,7 +108,7 @@ void GpuExecutor::executeGather(const Node& node) {
         launchGatherKernel(
             host_data,
             host_indices.data(),
-            output->data<float>(),
+            output->ptr_data<float>(),
             axis_dim_data,
             axis_dim_indices,
             outer_size,
@@ -129,7 +129,7 @@ void GpuExecutor::executeGather(const Node& node) {
             true,
             num_cpu_threads_
         );
-        CUDA_CHECK(cudaMemcpy(output->data<float>(), host_output.data(),
+        CUDA_CHECK(cudaMemcpy(output->ptr_data<float>(), host_output.data(),
                               static_cast<size_t>(total_size) * sizeof(float),
                               cudaMemcpyHostToDevice));
     }

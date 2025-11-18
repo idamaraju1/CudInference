@@ -22,17 +22,17 @@ void GpuExecutor::executeMul(const Node& node) {
             if (A->device() == DeviceType::CUDA) {
                 A->toCPU();
             }
-            float scalar = A->data<float>()[0];
-            launchMulScalarKernel(B->data<float>(), scalar, output->data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
+            float scalar = A->ptr_data<float>()[0];
+            launchMulScalarKernel(B->ptr_data<float>(), scalar, output->ptr_data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
         } else if (B_is_scalar) {
             // Move B to CPU to read the scalar value
             if (B->device() == DeviceType::CUDA) {
                 B->toCPU();
             }
-            float scalar = B->data<float>()[0];
-            launchMulScalarKernel(A->data<float>(), scalar, output->data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
+            float scalar = B->ptr_data<float>()[0];
+            launchMulScalarKernel(A->ptr_data<float>(), scalar, output->ptr_data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
         } else {
-            launchMulKernel(A->data<float>(), B->data<float>(), output->data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
+            launchMulKernel(A->ptr_data<float>(), B->ptr_data<float>(), output->ptr_data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
         }
 
         tensors_[node.outputs()[0]] = output;
@@ -78,7 +78,7 @@ void GpuExecutor::executeMul(const Node& node) {
     }
 
     if (use_cpu_fallback_) {
-        float* dst = output->data<float>();
+        float* dst = output->ptr_data<float>();
         for (size_t i = 0; i < total; ++i) {
             dst[i] = broadcastA[i] * broadcastB[i];
         }
@@ -87,7 +87,7 @@ void GpuExecutor::executeMul(const Node& node) {
         for (size_t i = 0; i < total; ++i) {
             host_output[i] = broadcastA[i] * broadcastB[i];
         }
-        CUDA_CHECK(cudaMemcpy(output->data<float>(), host_output.data(),
+        CUDA_CHECK(cudaMemcpy(output->ptr_data<float>(), host_output.data(),
                               total * sizeof(float), cudaMemcpyHostToDevice));
     }
 

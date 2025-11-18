@@ -66,12 +66,12 @@ template <typename SrcT>
 const SrcT* getHostData(const std::shared_ptr<Tensor>& tensor,
                         std::vector<uint8_t>& host_cache) {
     if (tensor->device() == DeviceType::CPU) {
-        return tensor->data<SrcT>();
+        return tensor->ptr_data<SrcT>();
     }
 
     size_t bytes = tensor->size() * sizeof(SrcT);
     host_cache.resize(bytes);
-    CUDA_CHECK(cudaMemcpy(host_cache.data(), tensor->data<SrcT>(), bytes, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(host_cache.data(), tensor->ptr_data<SrcT>(), bytes, cudaMemcpyDeviceToHost));
     return reinterpret_cast<const SrcT*>(host_cache.data());
 }
 
@@ -465,7 +465,7 @@ GpuExecutor::execute(const Graph& graph,
 
         // DEBUG: Print first few values (only for CPU FLOAT32 tensors to avoid segfault)
         if (tensor->device() == DeviceType::CPU && tensor->dtype() == DataType::FLOAT32 && tensor->size() > 0) {
-            const float* data_ptr = tensor->data<float>();
+            const float* data_ptr = tensor->ptr_data<float>();
             std::string values_str = "[";
             for (size_t i = 0; i < std::min<size_t>(5, tensor->size()); ++i) {
                 values_str += std::to_string(data_ptr[i]);

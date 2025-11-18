@@ -11,7 +11,7 @@ void GpuExecutor::executeGreater(const Node& node) {
 
     auto output = std::make_shared<Tensor>(output_shape, DataType::UINT8);
     size_t out_size = computeSizeFromShape(output_shape);
-    uint8_t* out_ptr = output->data<uint8_t>();
+    uint8_t* out_ptr = output->ptr_data<uint8_t>();
 
     DataType compare_dtype = promoteDataType(A->dtype(), B->dtype());
 

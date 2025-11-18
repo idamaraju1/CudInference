@@ -18,10 +18,10 @@ void GpuExecutor::executeDiv(const Node& node) {
             if (B->device() == DeviceType::CUDA) {
                 B->toCPU();
             }
-            float scalar = B->data<float>()[0];
-            launchDivScalarKernel(A->data<float>(), scalar, output->data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
+            float scalar = B->ptr_data<float>()[0];
+            launchDivScalarKernel(A->ptr_data<float>(), scalar, output->ptr_data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
         } else {
-            launchDivKernel(A->data<float>(), B->data<float>(), output->data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
+            launchDivKernel(A->ptr_data<float>(), B->ptr_data<float>(), output->ptr_data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
         }
 
         tensors_[node.outputs()[0]] = output;

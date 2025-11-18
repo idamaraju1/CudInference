@@ -32,7 +32,7 @@ void GpuExecutor::executeTrilu(const Node& node) {
 
     std::vector<uint8_t> cache;
     const float* src = getHostData<float>(input, cache);
-    float* dst = output->data<float>();
+    float* dst = output->ptr_data<float>();
 
     int64_t rows = input->dim(input->ndim() - 2);
     int64_t cols = input->dim(input->ndim() - 1);

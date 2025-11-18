@@ -45,7 +45,7 @@ void GpuExecutor::executeWhere(const Node& node) {
         std::vector<T> convB;
         const T* a_ptr = getDataAs<T>(A, cacheA, convA);
         const T* b_ptr = getDataAs<T>(B, cacheB, convB);
-        T* dst = output->data<T>();
+        T* dst = output->ptr_data<T>();
         for (size_t i = 0; i < cond_values.size(); ++i) {
             dst[i] = cond_values[i] ? a_ptr[i] : b_ptr[i];
         }

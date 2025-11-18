@@ -13,12 +13,12 @@ void GpuExecutor::executeReLU(const Node& node) {
     // Execute
     if (use_cpu_fallback_) {
         if (num_cpu_threads_ > 1) {
-            kernels::reluCPUMultiThreaded(X->data<float>(), Y->data<float>(), size, num_cpu_threads_);
+            kernels::reluCPUMultiThreaded(X->ptr_data<float>(), Y->ptr_data<float>(), size, num_cpu_threads_);
         } else {
-            kernels::reluCPU(X->data<float>(), Y->data<float>(), size);
+            kernels::reluCPU(X->ptr_data<float>(), Y->ptr_data<float>(), size);
         }
     } else {
-        kernels::launchReLU(X->data<float>(), Y->data<float>(), size);
+        kernels::launchReLU(X->ptr_data<float>(), Y->ptr_data<float>(), size);
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 

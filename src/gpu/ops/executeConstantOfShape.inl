@@ -29,9 +29,9 @@ void GpuExecutor::executeConstantOfShape(const Node& node) {
             if (value_attr->size() != 1) {
                 throw std::runtime_error("ConstantOfShape: value attribute must be a scalar");
             }
-            value = value_attr->data<T>()[0];
+            value = value_attr->ptr_data<T>()[0];
         }
-        fillTensorWithValue(output->data<T>(), total_elems, value);
+        fillTensorWithValue(output->ptr_data<T>(), total_elems, value);
     };
 
     switch (output_dtype) {

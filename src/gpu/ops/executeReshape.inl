@@ -16,13 +16,13 @@ void GpuExecutor::executeReshape(const Node& node) {
     std::vector<int64_t> new_shape;
     // Check data type and read accordingly
     if (shape_tensor->dtype() == DataType::INT64) {
-        const int64_t* shape_data = shape_tensor->data<int64_t>();
+        const int64_t* shape_data = shape_tensor->ptr_data<int64_t>();
         for (size_t i = 0; i < shape_tensor->size(); ++i) {
             new_shape.push_back(shape_data[i]);
         }
     } else {
         // Read as floats (computed tensors like Shape output) and convert to int64
-        const float* shape_data = shape_tensor->data<float>();
+        const float* shape_data = shape_tensor->ptr_data<float>();
         for (size_t i = 0; i < shape_tensor->size(); ++i) {
             new_shape.push_back(static_cast<int64_t>(shape_data[i]));
         }
@@ -52,7 +52,7 @@ void GpuExecutor::executeReshape(const Node& node) {
 
     auto output = allocateOutput(new_shape);
 
-    launchReshapeKernel(input->data<float>(), output->data<float>(), input->size(), use_cpu_fallback_, num_cpu_threads_);
+    launchReshapeKernel(input->ptr_data<float>(), output->ptr_data<float>(), input->size(), use_cpu_fallback_, num_cpu_threads_);
 
     tensors_[node.outputs()[0]] = output;
 }

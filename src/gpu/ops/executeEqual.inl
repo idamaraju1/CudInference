@@ -18,7 +18,7 @@ void GpuExecutor::executeEqual(const Node& node) {
         output->toCPU();
     }
 
-    uint8_t* out_ptr = output->data<uint8_t>();
+    uint8_t* out_ptr = output->ptr_data<uint8_t>();
     std::vector<uint8_t> cacheA;
     std::vector<uint8_t> cacheB;
 
