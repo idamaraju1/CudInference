@@ -38,6 +38,7 @@ set(CORE_SOURCES
     src/core/model_parser.cpp
     src/core/graph.cpp
     src/core/node.cpp
+    src/core/model_parser_optimized.cpp
 )
 
 set(UTILS_SOURCES
