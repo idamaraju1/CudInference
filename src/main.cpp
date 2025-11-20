@@ -17,21 +17,26 @@
 using namespace onnx_runner;
 
 void printUsage(const char* program_name) {
-    std::cout << "Usage: " << program_name << " <model.onnx> [options]\n";
-    std::cout << "Options:\n";
+    std::cout << "Usage: " << program_name << " <model.onnx> [options]\n\n";
+    std::cout << "Basic Options:\n";
     std::cout << "  --cpu             Use CPU fallback instead of GPU\n";
-    std::cout << "  --cpu-threads N   Max CPU threads for benchmark mode (default: auto-detect)\n";
-    std::cout << "                    Benchmark will test 1 to N threads\n";
     std::cout << "  --verbose         Print detailed timing information\n";
     std::cout << "  --debug           Enable debug logging\n";
+    std::cout << "  --help            Show this help message\n\n";
+    std::cout << "Benchmark Mode:\n";
     std::cout << "  --benchmark       Run multi-configuration benchmark (CPU 1-N threads + GPU)\n";
-    std::cout << "  --output FILE     Save benchmark results to JSON file (default: results.json)\n";
-    std::cout << "  --input TEXT      Input text to tokenize\n";
-    std::cout << "  --tokenizer FILE  Path to tokenizer.json file\n";
+    std::cout << "  --cpu-threads N   Max CPU threads for benchmark mode (default: auto-detect)\n";
+    std::cout << "                    Benchmark will test 1 to N threads\n";
+    std::cout << "  --output FILE     Save benchmark results to JSON file (default: results.json)\n\n";
+    std::cout << "Text Generation Mode (for LLM models):\n";
     std::cout << "  --generate        Enable autoregressive text generation\n";
+    std::cout << "  --input TEXT      Input text prompt to generate from (required with --generate)\n";
+    std::cout << "  --tokenizer FILE  Path to tokenizer.json file (required with --generate)\n";
     std::cout << "  --max-tokens N    Maximum tokens to generate (default: 50)\n";
-    std::cout << "  --temperature F   Sampling temperature (default: 1.0, 0.0=greedy)\n";
-    std::cout << "  --help            Show this help message\n";
+    std::cout << "  --temperature F   Sampling temperature (default: 1.0, 0.0=greedy)\n\n";
+    std::cout << "Example (Text Generation):\n";
+    std::cout << "  " << program_name << " model.onnx --input \"The sky is blue because\" \\\n";
+    std::cout << "    --tokenizer tokenizer.json --generate --max-tokens 5 --temperature 0.0\n";
 }
 
 // Helper to create a simple test input tensor

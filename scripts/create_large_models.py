@@ -100,7 +100,7 @@ def benchmark_model(onnx_file):
     print(f"{'─'*60}")
 
     # Run on GPU
-    print("\n🚀 Running on GPU...")
+    print("\n Running on GPU...")
     result_gpu = subprocess.run(
         ["./build/onnx_gpu_engine", onnx_file, "--verbose"],
         capture_output=True,
@@ -115,7 +115,7 @@ def benchmark_model(onnx_file):
             print(f"  GPU execution time: {gpu_time} ms")
 
     # Run on CPU
-    print("\n🖥️  Running on CPU...")
+    print("\n Running on CPU...")
     result_cpu = subprocess.run(
         ["./build/onnx_gpu_engine", onnx_file, "--cpu", "--verbose"],
         capture_output=True,

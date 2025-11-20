@@ -49,6 +49,36 @@ firefox visualization/benchmark_viewer.html
 # Then load results.json via the UI
 ```
 
+**Text generation mode (for LLM models):**
+```bash
+# Run language model in auto-regressive generation mode
+./build/onnx_gpu_engine model.onnx \
+  --input "The sky is blue because" \
+  --tokenizer tokenizer.json \
+  --generate \
+  --max-tokens 50 \
+  --temperature 0.0
+
+# Required flags:
+#   --input: Input text prompt to generate from
+#   --tokenizer: Path to tokenizer.json file (HuggingFace format)
+#   --generate: Enable auto-regressive text generation mode
+#
+# Optional flags:
+#   --max-tokens: Maximum number of tokens to generate (default: 50)
+#   --temperature: Sampling temperature (0.0 = greedy/deterministic, higher = more random)
+```
+
+**Example with SmolLM2:**
+```bash
+./onnx_gpu_engine ../SmolLM2-135M.onnx \
+  --input "The sky is blue because" \
+  --tokenizer ../tokenizer.json \
+  --generate \
+  --max-tokens 5 \
+  --temperature 0.0
+```
+
 **Create test models:**
 ```bash
 python3 scripts/create_test_model.py

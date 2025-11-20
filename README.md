@@ -161,6 +161,39 @@ The visualization provides:
 - **Bar Chart**: Side-by-side comparison of all configurations
 - **Interactive Controls**: Adjustable animation speed
 
+### Text Generation Mode (for LLM models)
+
+Run language models in auto-regressive generation mode:
+
+```bash
+# Basic example
+./build/onnx_gpu_engine model.onnx \
+  --input "The sky is blue because" \
+  --tokenizer tokenizer.json \
+  --generate \
+  --max-tokens 50 \
+  --temperature 0.0
+
+# Example with SmolLM2-135M
+./build/onnx_gpu_engine ../SmolLM2-135M.onnx \
+  --input "The sky is blue because" \
+  --tokenizer ../tokenizer.json \
+  --generate \
+  --max-tokens 5 \
+  --temperature 0.0
+```
+
+**Required flags for generation mode:**
+- `--input TEXT`: Input text prompt to generate from
+- `--tokenizer FILE`: Path to tokenizer.json file (HuggingFace format)
+- `--generate`: Enable auto-regressive text generation mode
+
+**Optional flags:**
+- `--max-tokens N`: Maximum number of tokens to generate (default: 50)
+- `--temperature F`: Sampling temperature (0.0 = greedy/deterministic, higher = more random, default: 1.0)
+- `--cpu`: Use CPU instead of GPU for generation
+- `--verbose`: Print detailed timing per token
+
 ### Creating Test Models
 
 Use the provided Python script to create test ONNX models:
