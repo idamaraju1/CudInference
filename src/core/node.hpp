@@ -13,54 +13,25 @@ class Tensor;
 // Supported operation types
 enum class OpType {
     UNKNOWN,
-    // Basic operations
+    // Arithmetic / linear algebra
     MATMUL,
-    RELU,
+    GEMM,
     ADD,
     SUB,
-    GEMM,
     MUL,
-    DIV,
+    RELU,
     // Tensor manipulation
-    RESHAPE,
     TRANSPOSE,
-    UNSQUEEZE,
-    SLICE,
-    CONCAT,
     GATHER,
-    EXPAND,
     SHAPE,
+    CAST,
     // Activations
-    SOFTMAX,
     SIGMOID,
     // Reductions
-    REDUCEMEAN,
     REDUCESUM,
-    // Math operations
-    POW,
-    SQRT,
-    NEG,
-    COS,
-    SIN,
-    // Comparison & logic
-    EQUAL,
-    GREATER,
-    WHERE,
-    // Type operations
-    CAST,
-    // Tensor creation
-    RANGE,
-    CONSTANTOFSHAPE,
     // Advanced operations
     ROTARYEMBEDDING,
     GROUPQUERYATTENTION,
-    TRILU,
-    SCATTERND,
-    // Legacy/less common
-    CONV,
-    MAXPOOL,
-    FLATTEN,
-    BATCHNORM,
     SIMPLIFIEDLAYERNORM,
     SKIPSIMPLIFIEDLAYERNORM
 };

@@ -536,8 +536,8 @@ void GpuExecutor::executeNode(const Node& node) {
         case OpType::MATMUL:
             executeMatMul(node);
             break;
-        case OpType::RELU:
-            executeReLU(node);
+        case OpType::GEMM:
+            executeGemm(node);
             break;
         case OpType::ADD:
             executeAdd(node);
@@ -545,41 +545,17 @@ void GpuExecutor::executeNode(const Node& node) {
         case OpType::SUB:
             executeSub(node);
             break;
-        case OpType::GEMM:
-            executeGemm(node);
+        case OpType::MUL:
+            executeMul(node);
+            break;
+        case OpType::RELU:
+            executeReLU(node);
             break;
         case OpType::GATHER:
             executeGather(node);
             break;
-        case OpType::MUL:
-            executeMul(node);
-            break;
-        case OpType::DIV:
-            executeDiv(node);
-            break;
-        case OpType::POW:
-            executePow(node);
-            break;
-        case OpType::SQRT:
-            executeSqrt(node);
-            break;
-        case OpType::REDUCEMEAN:
-            executeReduceMean(node);
-            break;
-        case OpType::RESHAPE:
-            executeReshape(node);
-            break;
         case OpType::TRANSPOSE:
             executeTranspose(node);
-            break;
-        case OpType::UNSQUEEZE:
-            executeUnsqueeze(node);
-            break;
-        case OpType::SLICE:
-            executeSlice(node);
-            break;
-        case OpType::CONCAT:
-            executeConcat(node);
             break;
         case OpType::SHAPE:
             executeShape(node);
@@ -587,44 +563,8 @@ void GpuExecutor::executeNode(const Node& node) {
         case OpType::CAST:
             executeCast(node);
             break;
-        case OpType::RANGE:
-            executeRange(node);
-            break;
-        case OpType::EQUAL:
-            executeEqual(node);
-            break;
-        case OpType::CONSTANTOFSHAPE:
-            executeConstantOfShape(node);
-            break;
-        case OpType::EXPAND:
-            executeExpand(node);
-            break;
-        case OpType::GREATER:
-            executeGreater(node);
-            break;
-        case OpType::NEG:
-            executeNeg(node);
-            break;
         case OpType::SIGMOID:
             executeSigmoid(node);
-            break;
-        case OpType::SIN:
-            executeSin(node);
-            break;
-        case OpType::COS:
-            executeCos(node);
-            break;
-        case OpType::SOFTMAX:
-            executeSoftmax(node);
-            break;
-        case OpType::SCATTERND:
-            executeScatterND(node);
-            break;
-        case OpType::TRILU:
-            executeTrilu(node);
-            break;
-        case OpType::WHERE:
-            executeWhere(node);
             break;
         case OpType::REDUCESUM:
             executeReduceSum(node);
@@ -654,30 +594,10 @@ void GpuExecutor::executeNode(const Node& node) {
 #include "ops/executeGemm.inl"
 #include "ops/executeGather.inl"
 #include "ops/executeMul.inl"
-#include "ops/executeDiv.inl"
-#include "ops/executePow.inl"
-#include "ops/executeSqrt.inl"
-#include "ops/executeReduceMean.inl"
-#include "ops/executeReshape.inl"
 #include "ops/executeTranspose.inl"
-#include "ops/executeUnsqueeze.inl"
-#include "ops/executeSlice.inl"
-#include "ops/executeConcat.inl"
 #include "ops/executeShape.inl"
 #include "ops/executeCast.inl"
-#include "ops/executeRange.inl"
-#include "ops/executeEqual.inl"
-#include "ops/executeConstantOfShape.inl"
-#include "ops/executeExpand.inl"
-#include "ops/executeGreater.inl"
-#include "ops/executeNeg.inl"
 #include "ops/executeSigmoid.inl"
-#include "ops/executeSin.inl"
-#include "ops/executeCos.inl"
-#include "ops/executeSoftmax.inl"
-#include "ops/executeScatterND.inl"
-#include "ops/executeTrilu.inl"
-#include "ops/executeWhere.inl"
 #include "ops/executeReduceSum.inl"
 #include "ops/executeSimplifiedLayerNormalization.inl"
 #include "ops/executeSkipSimplifiedLayerNormalization.inl"
