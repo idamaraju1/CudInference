@@ -8,17 +8,24 @@ void GpuExecutor::executeSigmoid(const Node& node) {
         throw std::runtime_error("Sigmoid currently supports FLOAT32 only");
     }
 
-    auto output = std::make_shared<Tensor>(input->shape(), DataType::FLOAT32);
-    std::vector<uint8_t> cache;
-    const float* src = getHostData<float>(input, cache);
-    float* dst = output->data<float>();
+    auto output = allocateOutput(input->shape(), DataType::FLOAT32);
+    int size = static_cast<int>(input->size());
 
-    for (size_t i = 0; i < input->size(); ++i) {
-        dst[i] = 1.0f / (1.0f + std::exp(-src[i]));
-    }
+    if (use_cpu_fallback_) {
+        // CPU path
+        std::vector<uint8_t> cache;
+        const float* src = getHostData<float>(input, cache);
+        float* dst = output->data<float>();
 
-    if (!use_cpu_fallback_) {
-        output->toGPU();
+        if (num_cpu_threads_ > 1) {
+            kernels::sigmoidCPUMultiThreaded(src, dst, size, num_cpu_threads_);
+        } else {
+            kernels::sigmoidCPU(src, dst, size);
+        }
+    } else {
+        // GPU path
+        kernels::launchSigmoid(input->data<float>(), output->data<float>(), size);
+        CUDA_CHECK(cudaDeviceSynchronize());
     }
 
     tensors_[node.outputs()[0]] = output;

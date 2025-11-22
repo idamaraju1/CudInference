@@ -225,61 +225,72 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
     float scale = scale_attr != 0.0f ? scale_attr : (1.0f / std::sqrt(static_cast<float>(head_dim)));
     float softcap = node.getFloatAttr("softcap", 0.0f);
 
-    std::vector<float> output_data(batch * q_seq * q_hidden, 0.f);
-    std::vector<float> scores(total_seq, 0.f);
+    // Allocate output tensor
+    auto output = allocateOutput(Q->shape(), DataType::FLOAT32);
 
-    for (size_t b = 0; b < batch; ++b) {
-        size_t valid = std::min(valid_lengths[b], total_seq);
-        if (valid == 0) valid = total_seq;
-        for (size_t qh = 0; qh < q_heads; ++qh) {
-            size_t kv_head = qh / group_size;
-            const float* key_head = key_storage.data() + ((b * kv_heads + kv_head) * total_seq * head_dim);
-            const float* value_head = value_storage.data() + ((b * kv_heads + kv_head) * total_seq * value_head_dim);
-            for (size_t qs = 0; qs < q_seq; ++qs) {
-                const float* q_vec = q_data + ((b * q_seq + qs) * q_hidden) + qh * head_dim;
-                size_t causal_limit = past_len + qs + 1;
-                size_t allowed = std::min(valid, causal_limit);
-                if (allowed == 0) allowed = 1;
+    if (use_cpu_fallback_) {
+        // CPU path: use existing CPU implementation
+        launchGroupQueryAttention(
+            q_data,
+            key_storage.data(),
+            value_storage.data(),
+            output->data<float>(),
+            static_cast<int>(batch),
+            static_cast<int>(q_seq),
+            static_cast<int>(q_heads),
+            static_cast<int>(kv_heads),
+            static_cast<int>(head_dim),
+            static_cast<int>(total_seq),
+            static_cast<int>(past_len),
+            scale,
+            softcap,
+            valid_lengths,
+            true,  // use_cpu
+            num_cpu_threads_
+        );
+    } else {
+        // GPU path: allocate device memory and launch kernel
+        float* d_Q;
+        float* d_K_storage;
+        float* d_V_storage;
 
-                float max_score = -std::numeric_limits<float>::infinity();
-                for (size_t t = 0; t < allowed; ++t) {
-                    const float* k_vec = key_head + t * head_dim;
-                    float dot = 0.f;
-                    for (size_t d = 0; d < head_dim; ++d) {
-                        dot += q_vec[d] * k_vec[d];
-                    }
-                    float scaled = dot * scale;
-                    if (softcap > 0.f) {
-                        scaled = softcap * std::tanh(scaled / softcap);
-                    }
-                    scores[t] = scaled;
-                    if (scaled > max_score) max_score = scaled;
-                }
+        size_t q_bytes = batch * q_seq * q_hidden * sizeof(float);
+        size_t k_bytes = key_storage_elems * sizeof(float);
+        size_t v_bytes = value_storage_elems * sizeof(float);
 
-                float denom = 0.f;
-                for (size_t t = 0; t < allowed; ++t) {
-                    float expv = std::exp(scores[t] - max_score);
-                    scores[t] = expv;
-                    denom += expv;
-                }
-                float inv_denom = denom > 0 ? 1.0f / denom : 0.0f;
+        CUDA_CHECK(cudaMalloc(&d_Q, q_bytes));
+        CUDA_CHECK(cudaMalloc(&d_K_storage, k_bytes));
+        CUDA_CHECK(cudaMalloc(&d_V_storage, v_bytes));
 
-                float* out_vec = output_data.data() + ((b * q_seq + qs) * q_hidden) + qh * head_dim;
-                std::fill(out_vec, out_vec + head_dim, 0.f);
+        CUDA_CHECK(cudaMemcpy(d_Q, q_data, q_bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_K_storage, key_storage.data(), k_bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(d_V_storage, value_storage.data(), v_bytes, cudaMemcpyHostToDevice));
 
-                for (size_t t = 0; t < allowed; ++t) {
-                    float weight = scores[t] * inv_denom;
-                    const float* v_vec = value_head + t * value_head_dim;
-                    for (size_t d = 0; d < head_dim; ++d) {
-                        out_vec[d] += weight * v_vec[d];
-                    }
-                }
-            }
-        }
+        launchGroupQueryAttention(
+            d_Q,
+            d_K_storage,
+            d_V_storage,
+            output->data<float>(),
+            static_cast<int>(batch),
+            static_cast<int>(q_seq),
+            static_cast<int>(q_heads),
+            static_cast<int>(kv_heads),
+            static_cast<int>(head_dim),
+            static_cast<int>(total_seq),
+            static_cast<int>(past_len),
+            scale,
+            softcap,
+            valid_lengths,
+            false,  // use_cpu
+            num_cpu_threads_
+        );
+
+        CUDA_CHECK(cudaDeviceSynchronize());
+
+        CUDA_CHECK(cudaFree(d_Q));
+        CUDA_CHECK(cudaFree(d_K_storage));
+        CUDA_CHECK(cudaFree(d_V_storage));
     }
-
-    auto output = std::make_shared<Tensor>(Q->shape(), DataType::FLOAT32);
-    std::memcpy(output->data<float>(), output_data.data(), output_data.size() * sizeof(float));
 
     auto present_key = std::make_shared<Tensor>(
         std::vector<int64_t>{static_cast<int64_t>(batch),

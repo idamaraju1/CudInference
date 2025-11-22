@@ -55,7 +55,39 @@ void simplifiedLayerNormCPU(const float* X, const float* gamma, const float* bet
 
 void simplifiedLayerNormCPUMultiThreaded(const float* X, const float* gamma, const float* beta, float* Y, int M, int N, float epsilon, int num_threads);
 
+// Sigmoid activation
+void launchSigmoid(const float* input, float* output, int size, cudaStream_t stream = 0);
+void sigmoidCPU(const float* input, float* output, int size);
+void sigmoidCPUMultiThreaded(const float* input, float* output, int size, int num_threads);
+
 } // namespace kernels
+
+// ReduceSum operation (outside kernels namespace)
+void launchReduceSum(
+    const float* input,
+    float* output,
+    const std::vector<int64_t>& input_shape,
+    const std::vector<int64_t>& output_shape,
+    const std::vector<bool>& reduce_mask,
+    bool keepdims,
+    bool use_cpu = false,
+    int num_threads = 1
+);
+
+// RotaryEmbedding operation (outside kernels namespace)
+void launchRotaryEmbedding(
+    const float* input,        // [batch_seq, num_heads, head_size]
+    const float* cos_cache,    // [batch_seq, rotary_half]
+    const float* sin_cache,    // [batch_seq, rotary_half]
+    float* output,             // [batch_seq, num_heads, head_size]
+    int batch_seq,
+    int num_heads,
+    int head_size,
+    int rotary_dim,
+    bool interleaved,
+    bool use_cpu = false,
+    int num_threads = 1
+);
 
 // Gather operation (outside kernels namespace)
 void launchGatherKernel(
@@ -95,5 +127,25 @@ void launchTransposeKernel(const float* input, float* output, const std::vector<
 void launchUnsqueezeKernel(const float* input, float* output, int64_t total_size, bool use_cpu = false, int num_threads = 1);
 void launchSliceKernel(const float* input, float* output, const std::vector<int64_t>& input_shape, const std::vector<int64_t>& starts, const std::vector<int64_t>& steps, const std::vector<int64_t>& output_shape, bool use_cpu = false, int num_threads = 1);
 void launchConcatKernel(const std::vector<const float*>& inputs, float* output, const std::vector<std::vector<int64_t>>& input_shapes, int64_t axis, const std::vector<int64_t>& output_shape, bool use_cpu = false, int num_threads = 1);
+
+// GroupQueryAttention operation
+void launchGroupQueryAttention(
+    const float* Q,
+    const float* K_storage,
+    const float* V_storage,
+    float* output,
+    int batch,
+    int q_seq,
+    int q_heads,
+    int kv_heads,
+    int head_dim,
+    int total_seq,
+    int past_len,
+    float scale,
+    float softcap,
+    const std::vector<size_t>& valid_lengths,
+    bool use_cpu = false,
+    int num_threads = 1
+);
 
 } // namespace onnx_runner

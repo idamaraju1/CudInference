@@ -62,6 +62,10 @@ set(CUDA_SOURCES
     src/gpu/kernels/tensor_ops.cu
     src/gpu/kernels/layernorm.cu
     src/gpu/kernels/sub.cu
+    src/gpu/kernels/sigmoid.cu
+    src/gpu/kernels/reducesum.cu
+    src/gpu/kernels/rotary_embedding.cu
+    src/gpu/kernels/group_query_attention.cu
 )
 
 # Main executable

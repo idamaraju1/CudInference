@@ -60,18 +60,18 @@ void GpuExecutor::executeReduceSum(const Node& node) {
         output_shape.push_back(1);
     }
 
-    size_t output_size = computeSizeFromShape(output_shape);
-    std::vector<float> host_output(output_size, 0.0f);
+    auto output = allocateOutput(output_shape);
 
-    std::vector<int64_t> input_strides = computeStrides(input->shape());
-    std::vector<int64_t> output_strides = computeStrides(output_shape);
+    // Currently only support FLOAT32 for GPU path
+    if (input->dtype() != DataType::FLOAT32) {
+        // Fallback to CPU for non-FLOAT32 types
+        size_t output_size = computeSizeFromShape(output_shape);
+        std::vector<float> host_output(output_size, 0.0f);
+        std::vector<int64_t> input_strides = computeStrides(input->shape());
+        std::vector<int64_t> output_strides = computeStrides(output_shape);
+        std::vector<uint8_t> cache;
+        size_t total_input = input->size();
 
-    std::vector<uint8_t> cache;
-
-    size_t total_input = input->size();
-
-    // Handle different data types
-    if (input->dtype() == DataType::INT64) {
         const int64_t* host_data = getHostData<int64_t>(input, cache);
         for (size_t idx = 0; idx < total_input; ++idx) {
             size_t remainder = idx;
@@ -100,43 +100,49 @@ void GpuExecutor::executeReduceSum(const Node& node) {
 
             host_output[out_idx] += static_cast<float>(host_data[idx]);
         }
-    } else {
-        const float* host_data = getHostData<float>(input, cache);
-        for (size_t idx = 0; idx < total_input; ++idx) {
-            size_t remainder = idx;
-            std::vector<int64_t> coords(ndim);
-            for (int64_t dim = 0; dim < ndim; ++dim) {
-                coords[dim] = remainder / input_strides[dim];
-                remainder %= input_strides[dim];
-            }
 
-            std::vector<int64_t> out_coords;
-            out_coords.reserve(output_shape.size());
-            for (int64_t dim = 0; dim < ndim; ++dim) {
-                if (reduce_mask[dim]) {
-                    if (keepdims) {
-                        out_coords.push_back(0);
-                    }
-                } else {
-                    out_coords.push_back(coords[dim]);
-                }
-            }
-
-            int64_t out_idx = 0;
-            for (size_t dim = 0; dim < out_coords.size(); ++dim) {
-                out_idx += out_coords[dim] * output_strides[dim];
-            }
-
-            host_output[out_idx] += host_data[idx];
+        size_t bytes = output_size * sizeof(float);
+        if (use_cpu_fallback_) {
+            std::memcpy(output->data<float>(), host_output.data(), bytes);
+        } else {
+            CUDA_CHECK(cudaMemcpy(output->data<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
         }
-    }
-
-    auto output = allocateOutput(output_shape);
-    size_t bytes = output_size * sizeof(float);
-    if (use_cpu_fallback_) {
-        std::memcpy(output->data<float>(), host_output.data(), bytes);
     } else {
-        CUDA_CHECK(cudaMemcpy(output->data<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
+        // FLOAT32 path - use GPU kernel
+        const float* input_ptr;
+        std::vector<uint8_t> cache;
+        bool need_free = false;
+
+        if (use_cpu_fallback_) {
+            input_ptr = getHostData<float>(input, cache);
+        } else {
+            if (input->device() == DeviceType::CUDA) {
+                input_ptr = input->data<float>();
+            } else {
+                const float* host_data = getHostData<float>(input, cache);
+                float* d_input;
+                size_t bytes = input->size() * sizeof(float);
+                CUDA_CHECK(cudaMalloc(&d_input, bytes));
+                CUDA_CHECK(cudaMemcpy(d_input, host_data, bytes, cudaMemcpyHostToDevice));
+                input_ptr = d_input;
+                need_free = true;
+            }
+        }
+
+        launchReduceSum(
+            input_ptr,
+            output->data<float>(),
+            input->shape(),
+            output_shape,
+            reduce_mask,
+            keepdims,
+            use_cpu_fallback_,
+            num_cpu_threads_
+        );
+
+        if (!use_cpu_fallback_ && need_free) {
+            CUDA_CHECK(cudaFree(const_cast<float*>(input_ptr)));
+        }
     }
 
     tensors_[node.outputs()[0]] = output;
