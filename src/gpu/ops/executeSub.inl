@@ -14,6 +14,24 @@ void GpuExecutor::executeSub(const Node& node) {
             auto C = allocateOutput(A->shape());
             int size = A->size();
 
+            // GPU_PERSISTENT MODE: Scalar broadcast on GPU
+            if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+                A->ensureOnGPU();
+                B->ensureOnGPU();
+
+                const float* d_A = A->deviceData<float>();
+                float* d_C = C->mutableDeviceData<float>();
+
+                // Read scalar from GPU (need single value copy)
+                float scalar;
+                CUDA_CHECK(cudaMemcpy(&scalar, B->deviceData<float>(), sizeof(float), cudaMemcpyDeviceToHost));
+
+                kernels::launchSubScalar(d_A, scalar, d_C, size);
+
+                tensors_[node.outputs()[0]] = C;
+                return;
+            }
+
             // Move B to CPU to read the scalar value
             if (B->device() == DeviceType::CUDA) {
                 B->toCPU();
@@ -43,6 +61,16 @@ void GpuExecutor::executeSub(const Node& node) {
     auto C = allocateOutput(A->shape());
     int size = A->size();
     LOG_DEBUG("  Sub: size=", size);
+
+    // GPU_PERSISTENT MODE
+    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        A->ensureOnGPU();
+        B->ensureOnGPU();
+        kernels::launchSub(A->deviceData<float>(), B->deviceData<float>(),
+                          C->mutableDeviceData<float>(), size);
+        tensors_[node.outputs()[0]] = C;
+        return;
+    }
 
     // Execute
     if (use_cpu_fallback_) {

@@ -518,8 +518,9 @@ GpuExecutor::execute(const Graph& graph,
             throw std::runtime_error("Output tensor not found: " + output_name);
         }
 
-        // Transfer back to CPU if needed
-        if (it->second->device() == DeviceType::CUDA) {
+        // Transfer back to CPU only if NOT in GPU_PERSISTENT mode
+        // In GPU_PERSISTENT mode, outputs stay on GPU for next iteration
+        if (exec_mode_ != ExecutionMode::GPU_PERSISTENT && it->second->device() == DeviceType::CUDA) {
             it->second->toCPU();
         }
 
@@ -618,13 +619,19 @@ bool GpuExecutor::hasTensor(const std::string& name) const {
 
 std::shared_ptr<Tensor> GpuExecutor::allocateOutput(const std::vector<int64_t>& shape,
                                                     DataType dtype) {
-    auto tensor = std::make_shared<Tensor>(shape, dtype);
-
-    if (!use_cpu_fallback_) {
+    // Select allocation strategy based on execution mode
+    if (use_cpu_fallback_ || exec_mode_ == ExecutionMode::CPU_ONLY) {
+        // CPU tensor
+        return std::make_shared<Tensor>(shape, dtype);
+    } else if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        // NEW: Create directly on GPU (no CPU allocation)
+        return Tensor::createOnGPU(shape, dtype);
+    } else {
+        // GPU_COPY mode (legacy): create on CPU then allocate GPU
+        auto tensor = std::make_shared<Tensor>(shape, dtype);
         tensor->allocateGPU();
+        return tensor;
     }
-
-    return tensor;
 }
 
 void GpuExecutor::transposeMatrix(const float* input, float* output, int rows, int cols, bool use_cpu) {
@@ -637,6 +644,123 @@ void GpuExecutor::transposeMatrix(const float* input, float* output, int rows, i
             output[j * rows + i] = input[i * cols + j];
         }
     }
+}
+
+// ============================================================================
+// Persistent KV Cache Management (Phase 3.1)
+// ============================================================================
+
+void GpuExecutor::initializeKVCache(
+    const std::string& cache_key,
+    int batch,
+    int kv_heads,
+    int max_seq_length,
+    int head_dim
+) {
+    if (exec_mode_ != ExecutionMode::GPU_PERSISTENT) {
+        throw std::runtime_error("KV cache requires GPU_PERSISTENT mode");
+    }
+
+    // Allocate large cache on GPU
+    std::vector<int64_t> shape = {batch, kv_heads, max_seq_length, head_dim};
+
+    auto key_cache = Tensor::createOnGPU(shape, DataType::FLOAT32);
+    auto value_cache = Tensor::createOnGPU(shape, DataType::FLOAT32);
+
+    // Zero initialize (already done in createOnGPU via cudaMemset)
+
+    kv_cache_[cache_key] = {key_cache, value_cache, 0, max_seq_length};
+
+    if (verbose_) {
+        LOG_INFO("Initialized KV cache '", cache_key, "' on GPU: batch=", batch,
+                 ", kv_heads=", kv_heads, ", max_seq=", max_seq_length,
+                 ", head_dim=", head_dim);
+    }
+}
+
+void GpuExecutor::appendKVCache(
+    const std::string& cache_key,
+    const std::shared_ptr<Tensor>& new_keys,
+    const std::shared_ptr<Tensor>& new_values
+) {
+    if (exec_mode_ != ExecutionMode::GPU_PERSISTENT) {
+        throw std::runtime_error("KV cache requires GPU_PERSISTENT mode");
+    }
+
+    if (kv_cache_.find(cache_key) == kv_cache_.end()) {
+        throw std::runtime_error("KV cache '" + cache_key + "' not initialized");
+    }
+
+    auto& entry = kv_cache_[cache_key];
+
+    if (!new_keys->isOnGPU() || !new_values->isOnGPU()) {
+        throw std::runtime_error("appendKVCache requires GPU tensors");
+    }
+
+    // new_keys/new_values: [batch, kv_heads, new_seq, head_dim]
+    int batch = static_cast<int>(entry.key_cache->dim(0));
+    int kv_heads = static_cast<int>(entry.key_cache->dim(1));
+    int head_dim = static_cast<int>(entry.key_cache->dim(3));
+    int new_seq = static_cast<int>(new_keys->dim(2));
+
+    if (entry.current_length + new_seq > entry.max_length) {
+        throw std::runtime_error("KV cache overflow: current=" + std::to_string(entry.current_length) +
+                                 " + new=" + std::to_string(new_seq) +
+                                 " > max=" + std::to_string(entry.max_length));
+    }
+
+    // Copy new K/V into cache at position current_length (GPU-to-GPU)
+    // Use 2D memcpy for each batch/head combination
+    size_t cache_seq_stride = entry.max_length * head_dim;
+    size_t new_seq_stride = new_seq * head_dim;
+
+    for (int b = 0; b < batch; ++b) {
+        for (int h = 0; h < kv_heads; ++h) {
+            // Destination offset in cache
+            float* dst_key = entry.key_cache->mutableDeviceData<float>() +
+                ((b * kv_heads + h) * cache_seq_stride) +
+                (entry.current_length * head_dim);
+
+            float* dst_val = entry.value_cache->mutableDeviceData<float>() +
+                ((b * kv_heads + h) * cache_seq_stride) +
+                (entry.current_length * head_dim);
+
+            // Source offset in new tensors
+            const float* src_key = new_keys->deviceData<float>() +
+                ((b * kv_heads + h) * new_seq_stride);
+
+            const float* src_val = new_values->deviceData<float>() +
+                ((b * kv_heads + h) * new_seq_stride);
+
+            // Device-to-device copy (fast!)
+            CUDA_CHECK(cudaMemcpy(dst_key, src_key, new_seq * head_dim * sizeof(float),
+                                  cudaMemcpyDeviceToDevice));
+            CUDA_CHECK(cudaMemcpy(dst_val, src_val, new_seq * head_dim * sizeof(float),
+                                  cudaMemcpyDeviceToDevice));
+        }
+    }
+
+    entry.current_length += new_seq;
+
+    if (verbose_) {
+        LOG_DEBUG("Appended ", new_seq, " tokens to KV cache '", cache_key,
+                  "', new length: ", entry.current_length);
+    }
+}
+
+std::pair<std::shared_ptr<Tensor>, std::shared_ptr<Tensor>>
+GpuExecutor::getKVCache(const std::string& cache_key) {
+    if (kv_cache_.find(cache_key) == kv_cache_.end()) {
+        throw std::runtime_error("KV cache '" + cache_key + "' not found");
+    }
+
+    auto& entry = kv_cache_[cache_key];
+
+    // Return the full cache tensors (caller will use current_length to know valid range)
+    // Note: In a more sophisticated implementation, we'd return sliced views
+    // For now, the attention kernel will use a "valid_length" parameter
+
+    return {entry.key_cache, entry.value_cache};
 }
 
 } // namespace onnx_runner

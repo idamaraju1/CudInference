@@ -74,6 +74,32 @@ void GpuExecutor::executeGemm(const Node& node) {
 
     auto Y = allocateOutput({M, N});
 
+    // GPU_PERSISTENT MODE: Keep everything on GPU
+    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        A_op->ensureOnGPU();
+        B_op->ensureOnGPU();
+
+        const float* d_A = A_op->deviceData<float>();
+        const float* d_B = B_op->deviceData<float>();
+        float* d_Y = Y->mutableDeviceData<float>();
+
+        // TODO: Use cuBLAS with transpose flags instead of pre-transposing
+        // For now, assume A_op and B_op are already correctly oriented
+        kernels::launchMatMul(d_A, d_B, d_Y, M, K, N);
+
+        // Add bias if present
+        if (node.inputs().size() >= 3) {
+            auto C = getTensor(node.inputs()[2]);
+            C->ensureOnGPU();
+
+            const float* d_C = C->deviceData<float>();
+            kernels::launchAdd(d_Y, d_C, d_Y, Y->size());
+        }
+
+        tensors_[node.outputs()[0]] = Y;
+        return;
+    }
+
     if (use_cpu_fallback_) {
         if (num_cpu_threads_ > 1) {
             kernels::matmulCPUMultiThreaded(A_op->data<float>(), B_op->data<float>(), Y->data<float>(),

@@ -11,6 +11,19 @@ void GpuExecutor::executeSigmoid(const Node& node) {
     auto output = allocateOutput(input->shape(), DataType::FLOAT32);
     int size = static_cast<int>(input->size());
 
+    // GPU_PERSISTENT MODE: Keep everything on GPU
+    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        input->ensureOnGPU();
+
+        const float* d_input = input->deviceData<float>();
+        float* d_output = output->mutableDeviceData<float>();
+
+        kernels::launchSigmoid(d_input, d_output, size);
+
+        tensors_[node.outputs()[0]] = output;
+        return;
+    }
+
     if (use_cpu_fallback_) {
         // CPU path
         std::vector<uint8_t> cache;

@@ -66,6 +66,7 @@ set(CUDA_SOURCES
     src/gpu/kernels/reducesum.cu
     src/gpu/kernels/rotary_embedding.cu
     src/gpu/kernels/group_query_attention.cu
+    src/gpu/kernels/kv_reformat.cu
 )
 
 # Main executable

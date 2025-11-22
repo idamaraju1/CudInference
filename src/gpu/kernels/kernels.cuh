@@ -148,4 +148,14 @@ void launchGroupQueryAttention(
     int num_threads = 1
 );
 
+// KV cache reformatting (for persistent GPU cache)
+void launchReformatKV(
+    const float* kv_input,     // [batch, seq, kv_hidden]
+    float* kv_output,          // [batch, kv_heads, seq, head_dim]
+    int batch,
+    int seq,
+    int kv_heads,
+    int head_dim
+);
+
 } // namespace onnx_runner

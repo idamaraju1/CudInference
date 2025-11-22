@@ -46,8 +46,18 @@ private:
 // GpuExecutor manages tensor allocation and graph execution on GPU
 class GpuExecutor {
 public:
+    // Execution modes for GPU memory management
+    enum class ExecutionMode {
+        CPU_ONLY,       // All tensors on CPU, use CPU kernels
+        GPU_COPY,       // Current mode: copy per operation (legacy)
+        GPU_PERSISTENT  // NEW: Keep tensors on GPU, minimal transfers
+    };
+
     GpuExecutor(bool use_cpu_fallback = false, int num_threads = 1)
-        : use_cpu_fallback_(use_cpu_fallback), num_cpu_threads_(num_threads) {}
+        : use_cpu_fallback_(use_cpu_fallback), num_cpu_threads_(num_threads) {
+        // Default to GPU_COPY for backwards compatibility
+        exec_mode_ = use_cpu_fallback ? ExecutionMode::CPU_ONLY : ExecutionMode::GPU_COPY;
+    }
 
     // Execute the graph with given inputs
     // inputs: map of input names to input tensors
@@ -59,14 +69,52 @@ public:
     // Set whether to print detailed timing information
     void setVerbose(bool verbose) { verbose_ = verbose; }
 
+    // Set execution mode (for persistent GPU memory)
+    void setExecutionMode(ExecutionMode mode) { exec_mode_ = mode; }
+    ExecutionMode getExecutionMode() const { return exec_mode_; }
+
 private:
     bool use_cpu_fallback_;
     bool verbose_ = false;
     int num_cpu_threads_;
+    ExecutionMode exec_mode_ = ExecutionMode::GPU_COPY;
 
     // Tensor storage during execution
     // Maps tensor name to tensor data
     std::map<std::string, std::shared_ptr<Tensor>> tensors_;
+
+    // NEW: Persistent KV cache for autoregressive generation
+    struct KVCacheEntry {
+        std::shared_ptr<Tensor> key_cache;    // [batch, kv_heads, max_seq, head_dim]
+        std::shared_ptr<Tensor> value_cache;  // [batch, kv_heads, max_seq, head_dim]
+        int current_length = 0;               // How many tokens cached
+        int max_length = 0;                   // Maximum sequence length
+    };
+
+    std::map<std::string, KVCacheEntry> kv_cache_;
+
+    // Initialize cache for a layer (allocates on GPU)
+    void initializeKVCache(
+        const std::string& cache_key,
+        int batch,
+        int kv_heads,
+        int max_seq_length,
+        int head_dim
+    );
+
+    // Append new keys/values to cache (GPU-to-GPU copy)
+    void appendKVCache(
+        const std::string& cache_key,
+        const std::shared_ptr<Tensor>& new_keys,
+        const std::shared_ptr<Tensor>& new_values
+    );
+
+    // Get current cache tensors (returns view slices)
+    std::pair<std::shared_ptr<Tensor>, std::shared_ptr<Tensor>>
+    getKVCache(const std::string& cache_key);
+
+    // Clear all KV caches (for new generation session)
+    void clearKVCaches() { kv_cache_.clear(); }
 
     // Execute a single node
     void executeNode(const Node& node);
@@ -101,6 +149,29 @@ private:
 
     // Helper: transpose a matrix
     void transposeMatrix(const float* input, float* output, int rows, int cols, bool use_cpu);
+
+    // Helper: get GPU pointer from tensor in GPU_PERSISTENT mode
+    template<typename T>
+    const T* getGPUData(const std::shared_ptr<Tensor>& tensor) {
+        if (exec_mode_ != ExecutionMode::GPU_PERSISTENT) {
+            throw std::runtime_error("getGPUData() called but not in GPU_PERSISTENT mode");
+        }
+        if (!tensor->isOnGPU()) {
+            throw std::runtime_error("Expected GPU tensor in GPU_PERSISTENT mode");
+        }
+        return tensor->deviceData<T>();
+    }
+
+    template<typename T>
+    T* getMutableGPUData(const std::shared_ptr<Tensor>& tensor) {
+        if (exec_mode_ != ExecutionMode::GPU_PERSISTENT) {
+            throw std::runtime_error("getMutableGPUData() called but not in GPU_PERSISTENT mode");
+        }
+        if (!tensor->isOnGPU()) {
+            throw std::runtime_error("Expected GPU tensor in GPU_PERSISTENT mode");
+        }
+        return tensor->mutableDeviceData<T>();
+    }
 };
 
 } // namespace onnx_runner

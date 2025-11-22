@@ -17,6 +17,29 @@ void GpuExecutor::executeMul(const Node& node) {
         auto output = allocateOutput(output_shape);
         int64_t size = output->size();
 
+        // GPU_PERSISTENT MODE
+        if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+            if (A_is_scalar) {
+                float scalar;
+                A->ensureOnGPU();
+                B->ensureOnGPU();
+                CUDA_CHECK(cudaMemcpy(&scalar, A->deviceData<float>(), sizeof(float), cudaMemcpyDeviceToHost));
+                launchMulScalarKernel(B->deviceData<float>(), scalar, output->mutableDeviceData<float>(), size, false, num_cpu_threads_);
+            } else if (B_is_scalar) {
+                float scalar;
+                A->ensureOnGPU();
+                B->ensureOnGPU();
+                CUDA_CHECK(cudaMemcpy(&scalar, B->deviceData<float>(), sizeof(float), cudaMemcpyDeviceToHost));
+                launchMulScalarKernel(A->deviceData<float>(), scalar, output->mutableDeviceData<float>(), size, false, num_cpu_threads_);
+            } else {
+                A->ensureOnGPU();
+                B->ensureOnGPU();
+                launchMulKernel(A->deviceData<float>(), B->deviceData<float>(), output->mutableDeviceData<float>(), size, false, num_cpu_threads_);
+            }
+            tensors_[node.outputs()[0]] = output;
+            return;
+        }
+
         if (A_is_scalar) {
             // Move A to CPU to read the scalar value
             if (A->device() == DeviceType::CUDA) {

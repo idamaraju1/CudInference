@@ -58,6 +58,35 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
     validateScale(gamma_tensor, "gamma");
     validateScale(beta_tensor, "beta");
 
+    // GPU_PERSISTENT MODE: Keep everything on GPU
+    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        X->ensureOnGPU();
+
+        const float* d_X = X->deviceData<float>();
+        float* d_Y = Y->mutableDeviceData<float>();
+
+        const float* d_gamma = nullptr;
+        const float* d_beta = nullptr;
+
+        if (gamma_tensor) {
+            gamma_tensor->ensureOnGPU();
+            d_gamma = gamma_tensor->deviceData<float>();
+        }
+        if (beta_tensor) {
+            beta_tensor->ensureOnGPU();
+            d_beta = beta_tensor->deviceData<float>();
+        }
+
+        kernels::launchSimplifiedLayerNorm(
+            d_X, d_gamma, d_beta, d_Y,
+            static_cast<int>(M), static_cast<int>(N),
+            epsilon, 0  // stream
+        );
+
+        tensors_[node.outputs()[0]] = Y;
+        return;
+    }
+
     if (use_cpu_fallback_) {
         // Previous fallback only normalized via sum-of-squares and skipped mean
         // subtraction, which diverged sharply from ONNX Runtime. Reuse the same

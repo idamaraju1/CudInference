@@ -23,6 +23,21 @@ void GpuExecutor::executeMatMul(const Node& node) {
         auto Y = allocateOutput({M, N});
         LOG_DEBUG("  MatMul: (", M, ", ", K, ") @ (", K, ", ", N, ") -> (", M, ", ", N, ")");
 
+        // GPU_PERSISTENT MODE: Direct GPU execution
+        if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+            A->ensureOnGPU();
+            B->ensureOnGPU();
+
+            const float* d_A = A->deviceData<float>();
+            const float* d_B = B->deviceData<float>();
+            float* d_Y = Y->mutableDeviceData<float>();
+
+            kernels::launchMatMul(d_A, d_B, d_Y, M, K, N);
+
+            tensors_[node.outputs()[0]] = Y;
+            return;
+        }
+
         if (use_cpu_fallback_) {
             if (num_cpu_threads_ > 1) {
                 kernels::matmulCPUMultiThreaded(A->data<float>(), B->data<float>(), Y->data<float>(),
@@ -84,6 +99,35 @@ void GpuExecutor::executeMatMul(const Node& node) {
         return;
     }
 
+    // GPU_PERSISTENT MODE: Batched matmul on GPU
+    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        A->ensureOnGPU();
+        B->ensureOnGPU();
+
+        // For now, use simple loop over batches (TODO: use cuBLAS batched API)
+        const float* d_A = A->deviceData<float>();
+        const float* d_B = B->deviceData<float>();
+        float* d_Y = Y->mutableDeviceData<float>();
+
+        size_t matrixA_size = static_cast<size_t>(M) * static_cast<size_t>(K);
+        size_t matrixB_size = static_cast<size_t>(K) * static_cast<size_t>(N);
+        size_t matrixY_size = static_cast<size_t>(M) * static_cast<size_t>(N);
+
+        // TODO: Handle broadcasting on GPU
+        // For now, assume shapes are already compatible (most common case)
+        for (size_t batch = 0; batch < batch_count; ++batch) {
+            const float* A_ptr = d_A + batch * matrixA_size;
+            const float* B_ptr = d_B + batch * matrixB_size;
+            float* Y_ptr = d_Y + batch * matrixY_size;
+
+            kernels::launchMatMul(A_ptr, B_ptr, Y_ptr, M, K, N);
+        }
+
+        tensors_[node.outputs()[0]] = Y;
+        return;
+    }
+
+    // CPU_ONLY and GPU_COPY modes (legacy)
     std::vector<uint8_t> cacheA;
     std::vector<uint8_t> cacheB;
     const float* hostA = getHostData<float>(A, cacheA);

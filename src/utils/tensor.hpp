@@ -95,6 +95,41 @@ public:
         return static_cast<const T*>(data());
     }
 
+    // NEW: GPU-aware data access methods for persistent GPU execution
+    // Get device pointer without forcing transfer (throws if not on GPU)
+    template<typename T>
+    const T* deviceData() const {
+        if (device_ != DeviceType::CUDA) {
+            throw std::runtime_error("Tensor::deviceData() called but tensor is not on GPU");
+        }
+        return static_cast<const T*>(gpu_data_.get());
+    }
+
+    template<typename T>
+    T* mutableDeviceData() {
+        if (device_ != DeviceType::CUDA) {
+            throw std::runtime_error("Tensor::mutableDeviceData() called but tensor is not on GPU");
+        }
+        return static_cast<T*>(gpu_data_.get());
+    }
+
+    // Check device location
+    bool isOnGPU() const { return device_ == DeviceType::CUDA; }
+    bool isOnCPU() const { return device_ == DeviceType::CPU; }
+
+    // Ensure tensor is on GPU (copy only if needed)
+    void ensureOnGPU() {
+        if (device_ != DeviceType::CUDA) {
+            toGPU();
+        }
+    }
+
+    // Static factory method to create tensor directly on GPU
+    static std::shared_ptr<Tensor> createOnGPU(
+        const std::vector<int64_t>& shape,
+        DataType dtype = DataType::FLOAT32
+    );
+
     // Device transfer
     void toGPU() {
         if (device_ == DeviceType::CUDA) return;

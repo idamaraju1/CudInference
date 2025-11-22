@@ -158,6 +158,128 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
         throw std::runtime_error("GroupQueryAttention: q_num_heads must be a multiple of kv_num_heads");
     }
 
+    float scale_attr = node.getFloatAttr("scale", 0.0f);
+    float scale = scale_attr != 0.0f ? scale_attr : (1.0f / std::sqrt(static_cast<float>(head_dim)));
+    float softcap = node.getFloatAttr("softcap", 0.0f);
+
+    // ========================================================================
+    // GPU_PERSISTENT MODE: Exact same logic as GPU_COPY but on GPU
+    // ========================================================================
+    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        // Ensure inputs are on GPU
+        Q->ensureOnGPU();
+        K->ensureOnGPU();
+        V->ensureOnGPU();
+        if (past_key) past_key->ensureOnGPU();
+        if (past_value) past_value->ensureOnGPU();
+
+        const float* d_Q = Q->deviceData<float>();
+        const float* d_K = K->deviceData<float>();
+        const float* d_V = V->deviceData<float>();
+
+        // Allocate full KV storage on GPU: [batch, kv_heads, total_seq, head_dim]
+        size_t key_storage_elems = batch * kv_heads * total_seq * head_dim;
+        size_t value_storage_elems = batch * kv_heads * total_seq * value_head_dim;
+
+        auto key_storage = Tensor::createOnGPU(
+            {static_cast<int64_t>(key_storage_elems)}, DataType::FLOAT32);
+        auto value_storage = Tensor::createOnGPU(
+            {static_cast<int64_t>(value_storage_elems)}, DataType::FLOAT32);
+
+        float* d_key_storage = key_storage->mutableDeviceData<float>();
+        float* d_value_storage = value_storage->mutableDeviceData<float>();
+
+        // Copy past KV cache to beginning (if exists)
+        if (past_key && past_len > 0) {
+            size_t src_stride = past_len * head_dim;
+            size_t dst_stride = total_seq * head_dim;
+            for (size_t b = 0; b < batch; ++b) {
+                for (size_t h = 0; h < kv_heads; ++h) {
+                    const float* src = past_key->deviceData<float>() + ((b * kv_heads + h) * src_stride);
+                    float* dst = d_key_storage + ((b * kv_heads + h) * dst_stride);
+                    CUDA_CHECK(cudaMemcpy(dst, src, src_stride * sizeof(float), cudaMemcpyDeviceToDevice));
+                }
+            }
+        }
+        if (past_value && past_len > 0) {
+            size_t src_stride = past_len * value_head_dim;
+            size_t dst_stride = total_seq * value_head_dim;
+            for (size_t b = 0; b < batch; ++b) {
+                for (size_t h = 0; h < kv_heads; ++h) {
+                    const float* src = past_value->deviceData<float>() + ((b * kv_heads + h) * src_stride);
+                    float* dst = d_value_storage + ((b * kv_heads + h) * dst_stride);
+                    CUDA_CHECK(cudaMemcpy(dst, src, src_stride * sizeof(float), cudaMemcpyDeviceToDevice));
+                }
+            }
+        }
+
+        // Reformat and append new K/V (same logic as GPU_COPY mode lines 359-372)
+        for (size_t b = 0; b < batch; ++b) {
+            for (size_t seq = 0; seq < kv_seq; ++seq) {
+                for (size_t h = 0; h < kv_heads; ++h) {
+                    const float* src_k = d_K + ((b * kv_seq + seq) * k_hidden) + h * head_dim;
+                    const float* src_v = d_V + ((b * kv_seq + seq) * v_hidden) + h * value_head_dim;
+                    float* dst_k = d_key_storage +
+                                   (((b * kv_heads + h) * total_seq) + (past_len + seq)) * head_dim;
+                    float* dst_v = d_value_storage +
+                                   (((b * kv_heads + h) * total_seq) + (past_len + seq)) * value_head_dim;
+                    CUDA_CHECK(cudaMemcpy(dst_k, src_k, head_dim * sizeof(float), cudaMemcpyDeviceToDevice));
+                    CUDA_CHECK(cudaMemcpy(dst_v, src_v, value_head_dim * sizeof(float), cudaMemcpyDeviceToDevice));
+                }
+            }
+        }
+
+        // Allocate output on GPU
+        auto output = allocateOutput(Q->shape(), DataType::FLOAT32);
+
+        // Launch attention kernel
+        launchGroupQueryAttention(
+            d_Q,
+            d_key_storage,
+            d_value_storage,
+            output->mutableDeviceData<float>(),
+            static_cast<int>(batch),
+            static_cast<int>(q_seq),
+            static_cast<int>(q_heads),
+            static_cast<int>(kv_heads),
+            static_cast<int>(head_dim),
+            static_cast<int>(total_seq),
+            static_cast<int>(past_len),
+            scale,
+            softcap,
+            valid_lengths,
+            false,
+            num_cpu_threads_
+        );
+
+        tensors_[outputs[0]] = output;
+
+        // Store present KV cache (reshape to 4D)
+        if (outputs.size() > 1 && !outputs[1].empty()) {
+            auto present_key = Tensor::createOnGPU(
+                {static_cast<int64_t>(batch), static_cast<int64_t>(kv_heads),
+                 static_cast<int64_t>(total_seq), static_cast<int64_t>(head_dim)},
+                DataType::FLOAT32);
+            CUDA_CHECK(cudaMemcpy(present_key->mutableDeviceData<float>(), d_key_storage,
+                                  key_storage_elems * sizeof(float), cudaMemcpyDeviceToDevice));
+            tensors_[outputs[1]] = present_key;
+        }
+        if (outputs.size() > 2 && !outputs[2].empty()) {
+            auto present_value = Tensor::createOnGPU(
+                {static_cast<int64_t>(batch), static_cast<int64_t>(kv_heads),
+                 static_cast<int64_t>(total_seq), static_cast<int64_t>(value_head_dim)},
+                DataType::FLOAT32);
+            CUDA_CHECK(cudaMemcpy(present_value->mutableDeviceData<float>(), d_value_storage,
+                                  value_storage_elems * sizeof(float), cudaMemcpyDeviceToDevice));
+            tensors_[outputs[2]] = present_value;
+        }
+
+        return;
+    }
+
+    // ========================================================================
+    // CPU_ONLY and GPU_COPY MODES (legacy paths)
+    // ========================================================================
     std::vector<uint8_t> q_cache;
     std::vector<uint8_t> k_cache;
     std::vector<uint8_t> v_cache;
@@ -220,10 +342,6 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
             }
         }
     }
-
-    float scale_attr = node.getFloatAttr("scale", 0.0f);
-    float scale = scale_attr != 0.0f ? scale_attr : (1.0f / std::sqrt(static_cast<float>(head_dim)));
-    float softcap = node.getFloatAttr("softcap", 0.0f);
 
     // Allocate output tensor
     auto output = allocateOutput(Q->shape(), DataType::FLOAT32);

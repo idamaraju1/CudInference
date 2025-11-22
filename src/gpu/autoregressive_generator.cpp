@@ -612,6 +612,11 @@ std::shared_ptr<Tensor> AutoregressiveGenerator::extractNextTokenLogits(
         int seq_len = shape[1];
         int vocab_size = shape[2];
 
+        // Transfer logits to CPU if needed (for sampling)
+        if (logits_tensor->device() == DeviceType::CUDA) {
+            logits_tensor->toCPU();
+        }
+
         // Extract logits for the last position
         // We want logits[0, seq_len-1, :] which is the prediction for the next token
         const float* all_logits = logits_tensor->data<float>();

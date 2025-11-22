@@ -300,6 +300,12 @@ int main(int argc, char** argv) {
             GpuExecutor executor(use_cpu);
             executor.setVerbose(verbose);
 
+            // Enable GPU_PERSISTENT mode for minimal CPU-GPU transfers
+            if (!use_cpu) {
+                executor.setExecutionMode(GpuExecutor::ExecutionMode::GPU_PERSISTENT);
+                LOG_INFO("GPU_PERSISTENT mode enabled - tensors stay on GPU");
+            }
+
             AutoregressiveGenerator::GenerationConfig gen_config;
             gen_config.max_tokens = max_tokens;
             gen_config.temperature = temperature;
@@ -407,6 +413,12 @@ int main(int argc, char** argv) {
 
             GpuExecutor executor(use_cpu);
             executor.setVerbose(verbose);
+
+            // Enable GPU_PERSISTENT mode for minimal CPU-GPU transfers
+            if (!use_cpu) {
+                executor.setExecutionMode(GpuExecutor::ExecutionMode::GPU_PERSISTENT);
+                LOG_INFO("GPU_PERSISTENT mode enabled - tensors stay on GPU");
+            }
 
             auto exec_start = std::chrono::high_resolution_clock::now();
 

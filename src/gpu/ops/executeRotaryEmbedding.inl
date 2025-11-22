@@ -188,6 +188,54 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
 
     int batch_seq = static_cast<int>(batch * sequence_length);
 
+    // ========================================================================
+    // GPU_PERSISTENT MODE: Keep everything on GPU
+    // ========================================================================
+    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        // Ensure inputs are on GPU
+        data_tensor->ensureOnGPU();
+        cos_tensor->ensureOnGPU();
+        sin_tensor->ensureOnGPU();
+
+        // Get GPU pointers - assume cos/sin are already at correct positions
+        // (position selection logic would need GPU implementation for full support)
+        const float* d_input = data_tensor->deviceData<float>();
+        const float* d_cos = cos_tensor->deviceData<float>();
+        const float* d_sin = sin_tensor->deviceData<float>();
+
+        // TODO: Handle BNSH -> BSNH conversion on GPU if needed
+        // For now, assume input is in correct format or handle conversion later
+
+        // Allocate output on GPU
+        auto output = allocateOutput(data_tensor->shape(), DataType::FLOAT32);
+
+        // Launch RoPE kernel with GPU pointers
+        launchRotaryEmbedding(
+            d_input, d_cos, d_sin,
+            output->mutableDeviceData<float>(),
+            batch_seq,
+            static_cast<int>(num_heads),
+            static_cast<int>(head_size),
+            static_cast<int>(rotary_dim),
+            interleaved,
+            false,  // use_cpu = false
+            num_cpu_threads_
+        );
+
+        // Output stays on GPU!
+        tensors_[outputs[0]] = output;
+
+        if (verbose_) {
+            LOG_DEBUG("RotaryEmbedding GPU_PERSISTENT: batch_seq=", batch_seq,
+                      ", num_heads=", num_heads, ", head_size=", head_size);
+        }
+
+        return;  // Done with GPU_PERSISTENT path
+    }
+
+    // ========================================================================
+    // CPU_ONLY and GPU_COPY MODES (legacy paths)
+    // ========================================================================
     if (use_cpu_fallback_) {
         // CPU path
         launchRotaryEmbedding(
