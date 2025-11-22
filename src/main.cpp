@@ -1,4 +1,4 @@
-#define USE_CPU // Temporary definition for compile-time flag
+// #define USE_CPU // Temporary definition for compile-time flag
 
 #include <iostream>
 #include <memory>
@@ -277,7 +277,7 @@ int main(int argc, char** argv) {
         LOG_INFO("Model parsing took ", parse_duration, " ms");
 
         // Step 2: Print graph summary
-        graph->printSummary();
+        // graph->printSummary();
 
         // Step 2.5: Handle autoregressive generation mode
         if (generate) {
@@ -298,8 +298,10 @@ int main(int argc, char** argv) {
             // Create generator
             #ifdef USE_CPU
                 CpuExecutor executor;
+                LOG_INFO("Using CpuExecutor");
             #else
                 GpuExecutor executor;
+                LOG_INFO("Using GpuExecutor");
             #endif
             executor.setVerbose(verbose);
 
