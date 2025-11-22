@@ -14,6 +14,7 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
         V->dtype() != DataType::FLOAT32) {
         throw std::runtime_error("GroupQueryAttention currently supports FLOAT32 tensors only");
     }
+
     if (Q->ndim() != 3 || K->ndim() != 3 || V->ndim() != 3) {
         throw std::runtime_error("GroupQueryAttention expects 3D Q/K/V tensors [batch, seq, hidden]");
     }
@@ -40,6 +41,10 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
         ++cursor;
     } else {
         past_value = nullptr;
+    }
+
+    if ((past_key && !past_value) || (!past_key && past_value)) {
+        throw std::runtime_error("GroupQueryAttention requires both past_key and past_value when using KV cache");
     }
 
     auto seq_len_tensor = getOptionalTensor(cursor);
@@ -77,6 +82,9 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
         throw std::runtime_error("GroupQueryAttention: V hidden size must be divisible by kv_num_heads");
     }
     size_t value_head_dim = v_hidden / kv_heads;
+    if (value_head_dim != head_dim) {
+        throw std::runtime_error("GroupQueryAttention: value head dimension must equal query head dimension");
+    }
 
     size_t past_len = past_key ? static_cast<size_t>(past_key->dim(2)) : 0;
     size_t total_seq = past_len + kv_seq;
@@ -129,16 +137,20 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
         }
     }
 
-    if (past_key && (past_key->dim(0) != static_cast<int64_t>(batch) ||
-                     past_key->dim(1) != static_cast<int64_t>(kv_heads) ||
-                     past_key->dim(3) != static_cast<int64_t>(head_dim))) {
-        throw std::runtime_error("GroupQueryAttention: past_key shape mismatch");
+    if (past_key) {
+        if (past_key->dim(0) != static_cast<int64_t>(batch) ||
+            past_key->dim(1) != static_cast<int64_t>(kv_heads) ||
+            past_key->dim(3) != static_cast<int64_t>(head_dim)) {
+            throw std::runtime_error("GroupQueryAttention: past_key shape mismatch");
+        }
     }
-    if (past_value && (past_value->dim(0) != static_cast<int64_t>(batch) ||
-                       past_value->dim(1) != static_cast<int64_t>(kv_heads) ||
-                       past_value->dim(3) != static_cast<int64_t>(value_head_dim) ||
-                       (!past_key && past_value->dim(2) != 0 && past_value->dim(2) != static_cast<int64_t>(past_len)))) {
-        throw std::runtime_error("GroupQueryAttention: past_value shape mismatch");
+    if (past_value) {
+        if (past_value->dim(0) != static_cast<int64_t>(batch) ||
+            past_value->dim(1) != static_cast<int64_t>(kv_heads) ||
+            past_value->dim(2) != static_cast<int64_t>(past_len) ||
+            past_value->dim(3) != static_cast<int64_t>(value_head_dim)) {
+            throw std::runtime_error("GroupQueryAttention: past_value shape mismatch");
+        }
     }
 
     size_t group_size = q_heads / kv_heads;
@@ -170,12 +182,28 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
     if (past_key) {
         size_t elems = batch * kv_heads * past_len * head_dim;
         auto past_data = copyCacheTensor(past_key, elems);
-        std::memcpy(key_storage.data(), past_data.data(), elems * sizeof(float));
+        size_t src_stride = past_len * head_dim;
+        size_t dst_stride = total_seq * head_dim;
+        for (size_t b = 0; b < batch; ++b) {
+            for (size_t h = 0; h < kv_heads; ++h) {
+                const float* src = past_data.data() + ((b * kv_heads + h) * src_stride);
+                float* dst = key_storage.data() + ((b * kv_heads + h) * dst_stride);
+                std::memcpy(dst, src, src_stride * sizeof(float));
+            }
+        }
     }
     if (past_value) {
         size_t elems = batch * kv_heads * past_len * value_head_dim;
         auto past_data = copyCacheTensor(past_value, elems);
-        std::memcpy(value_storage.data(), past_data.data(), elems * sizeof(float));
+        size_t src_stride = past_len * value_head_dim;
+        size_t dst_stride = total_seq * value_head_dim;
+        for (size_t b = 0; b < batch; ++b) {
+            for (size_t h = 0; h < kv_heads; ++h) {
+                const float* src = past_data.data() + ((b * kv_heads + h) * src_stride);
+                float* dst = value_storage.data() + ((b * kv_heads + h) * dst_stride);
+                std::memcpy(dst, src, src_stride * sizeof(float));
+            }
+        }
     }
 
     for (size_t b = 0; b < batch; ++b) {
@@ -204,7 +232,7 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
         size_t valid = std::min(valid_lengths[b], total_seq);
         if (valid == 0) valid = total_seq;
         for (size_t qh = 0; qh < q_heads; ++qh) {
-            size_t kv_head = std::min(kv_heads - 1, qh / group_size);
+            size_t kv_head = qh / group_size;
             const float* key_head = key_storage.data() + ((b * kv_heads + kv_head) * total_seq * head_dim);
             const float* value_head = value_storage.data() + ((b * kv_heads + kv_head) * total_seq * value_head_dim);
             for (size_t qs = 0; qs < q_seq; ++qs) {
@@ -236,13 +264,13 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
                 }
                 float inv_denom = denom > 0 ? 1.0f / denom : 0.0f;
 
-                float* out_vec = output_data.data() + ((b * q_seq + qs) * q_hidden) + qh * value_head_dim;
-                std::fill(out_vec, out_vec + value_head_dim, 0.f);
+                float* out_vec = output_data.data() + ((b * q_seq + qs) * q_hidden) + qh * head_dim;
+                std::fill(out_vec, out_vec + head_dim, 0.f);
 
                 for (size_t t = 0; t < allowed; ++t) {
                     float weight = scores[t] * inv_denom;
                     const float* v_vec = value_head + t * value_head_dim;
-                    for (size_t d = 0; d < value_head_dim; ++d) {
+                    for (size_t d = 0; d < head_dim; ++d) {
                         out_vec[d] += weight * v_vec[d];
                     }
                 }

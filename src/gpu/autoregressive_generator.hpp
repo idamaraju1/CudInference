@@ -104,10 +104,14 @@ private:
     /**
      * Create input tensors for the model from token IDs
      * @param token_ids Current sequence of token IDs
+     * @param start_position Starting position for position_ids (for KV cache decode)
+     * @param past_kv Past key-value cache tensors (for decode mode)
      * @return Map of input name to tensor (input_ids, attention_mask, etc.)
      */
     std::map<std::string, std::shared_ptr<Tensor>>
-    createInputTensors(const std::vector<int64_t>& token_ids);
+    createInputTensors(const std::vector<int64_t>& token_ids,
+                      int64_t start_position,
+                      const std::map<std::string, std::shared_ptr<Tensor>>& past_kv);
 
     /**
      * Extract logits for the last position from model output
@@ -116,6 +120,21 @@ private:
      */
     std::shared_ptr<Tensor> extractNextTokenLogits(
         const std::map<std::string, std::shared_ptr<Tensor>>& outputs);
+
+    /**
+     * Inspect cached KV tensors to infer the currently cached sequence length.
+     * Throws if different layers disagree to avoid silent cache corruption.
+     */
+    int64_t inferPastLength(const std::map<std::string, std::shared_ptr<Tensor>>& past_kv) const;
+
+    /**
+     * Emit detailed statistics about the logits distribution so we can spot
+     * pathological domination (e.g., repetitive "the the the").
+     */
+    void logLogitStatistics(const Tensor& logits,
+                            int step_index,
+                            int64_t past_length,
+                            int64_t total_length) const;
 };
 
 } // namespace onnx_runner

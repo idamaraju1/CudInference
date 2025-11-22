@@ -4,49 +4,92 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
     }
 
     auto X = getTensor(node.inputs()[0]);
+    if (X->dtype() != DataType::FLOAT32) {
+        throw std::runtime_error("SimplifiedLayerNormalization currently supports FLOAT32 tensors only");
+    }
+
     auto Y = allocateOutput(X->shape(), X->dtype());
     size_t total = X->size();
-    size_t N = X->shape().back();
+
+    int64_t axis_attr = node.getIntAttr("axis", static_cast<int64_t>(X->ndim()) - 1);
+    if (axis_attr < 0) {
+        axis_attr += static_cast<int64_t>(X->ndim());
+    }
+    if (axis_attr < 0 || axis_attr >= static_cast<int64_t>(X->ndim())) {
+        throw std::runtime_error("SimplifiedLayerNormalization: invalid axis attribute");
+    }
+
+    size_t N = 1;
+    for (int64_t i = axis_attr; i < static_cast<int64_t>(X->ndim()); ++i) {
+        N *= static_cast<size_t>(X->dim(static_cast<size_t>(i)));
+    }
+    if (N == 0 || total % N != 0) {
+        throw std::runtime_error("SimplifiedLayerNormalization: invalid hidden size computed from axis");
+    }
     size_t M = total / N;
     float epsilon = node.getFloatAttr("epsilon", 1e-5f);
 
-    const float* gamma = nullptr;
-    const float* beta = nullptr;
-
+    std::shared_ptr<Tensor> gamma_tensor = nullptr;
+    std::shared_ptr<Tensor> beta_tensor = nullptr;
     if (node.inputs().size() >= 2) {
-        auto G = getTensor(node.inputs()[1]);
-        if (G) {
-            if (use_cpu_fallback_ && G->device() == DeviceType::CUDA) G->toCPU();
-            gamma = G->data<float>();
-        }
+        gamma_tensor = getTensor(node.inputs()[1]);
     }
     if (node.inputs().size() >= 3) {
-        auto B = getTensor(node.inputs()[2]);
-        if (B) {
-            if (use_cpu_fallback_ && B->device() == DeviceType::CUDA) B->toCPU();
-            beta = B->data<float>();
-        }
+        beta_tensor = getTensor(node.inputs()[2]);
     }
 
-    // Dispatch CPU or GPU path
-    // inside executeSimplifiedLayerNormalization after you’ve validated shapes
-    const auto& ins = node.inputs();
+    auto validateScale = [&](const std::shared_ptr<Tensor>& tensor,
+                             const char* name) {
+        if (!tensor) return;
+        if (tensor->dtype() != DataType::FLOAT32) {
+            throw std::runtime_error(std::string("SimplifiedLayerNormalization: ")
+                                     + name + " must be FLOAT32");
+        }
+        size_t count = tensor->size();
+        if (count != N) {
+            throw std::runtime_error(std::string("SimplifiedLayerNormalization: ")
+                                     + name + " size ("
+                                     + std::to_string(count)
+                                     + ") must equal normalized dimension ("
+                                     + std::to_string(N) + ")");
+        }
+    };
+
+    validateScale(gamma_tensor, "gamma");
+    validateScale(beta_tensor, "beta");
+
     if (use_cpu_fallback_) {
-        // Ensure host access
-        if (X->device() == DeviceType::CUDA) X->toCPU();
-        if (Y->device() == DeviceType::CUDA) Y->toCPU();
-        const float* gammaPtr = nullptr;
-        const float* betaPtr  = nullptr;
-        if (ins.size() >= 2) { auto G = getTensor(ins[1]); if (G && G->device()==DeviceType::CUDA) G->toCPU(); gammaPtr = ins.size()>=2 ? getTensor(ins[1])->data<float>() : nullptr; }
-        if (ins.size() >= 3) { auto B = getTensor(ins[2]); if (B && B->device()==DeviceType::CUDA) B->toCPU(); betaPtr  = ins.size()>=3 ? getTensor(ins[2])->data<float>() : nullptr; }
+        // Previous fallback only normalized via sum-of-squares and skipped mean
+        // subtraction, which diverged sharply from ONNX Runtime. Reuse the same
+        // accumulation math as the CUDA path so CPU traces line up.
+        std::vector<uint8_t> x_cache;
+        std::vector<uint8_t> gamma_cache;
+        std::vector<uint8_t> beta_cache;
+        const float* x_data = getHostData<float>(X, x_cache);
+        const float* gamma_host = nullptr;
+        const float* beta_host = nullptr;
+        if (gamma_tensor) {
+            gamma_host = getHostData<float>(gamma_tensor, gamma_cache);
+        }
+        if (beta_tensor) {
+            beta_host = getHostData<float>(beta_tensor, beta_cache);
+        }
+        float* y_data = Y->data<float>();
 
         if (num_cpu_threads_ > 1) {
             kernels::simplifiedLayerNormCPUMultiThreaded(
-                X->data<float>(), gammaPtr, betaPtr, Y->data<float>(), (int)M, (int)N, epsilon, num_cpu_threads_);
+                x_data, gamma_host, beta_host, y_data,
+                static_cast<int>(M), static_cast<int>(N),
+                epsilon, num_cpu_threads_);
         } else {
             kernels::simplifiedLayerNormCPU(
-                X->data<float>(), gammaPtr, betaPtr, Y->data<float>(), (int)M, (int)N, epsilon);
+                x_data, gamma_host, beta_host, y_data,
+                static_cast<int>(M), static_cast<int>(N),
+                epsilon);
         }
+
+        tensors_[node.outputs()[0]] = Y;
+        return;
     } else {
         // Ensure device pointers
         if (X->device() == DeviceType::CPU) X->toGPU();
@@ -54,8 +97,14 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
 
         const float* gammaDev = nullptr;
         const float* betaDev  = nullptr;
-        if (ins.size() >= 2) { auto G = getTensor(ins[1]); if (G && G->device()==DeviceType::CPU) G->toGPU(); gammaDev = ins.size()>=2 ? getTensor(ins[1])->data<float>() : nullptr; }
-        if (ins.size() >= 3) { auto B = getTensor(ins[2]); if (B && B->device()==DeviceType::CPU) B->toGPU(); betaDev  = ins.size()>=3 ? getTensor(ins[2])->data<float>() : nullptr; }
+        if (gamma_tensor) {
+            if (gamma_tensor->device() == DeviceType::CPU) gamma_tensor->toGPU();
+            gammaDev = gamma_tensor->data<float>();
+        }
+        if (beta_tensor) {
+            if (beta_tensor->device() == DeviceType::CPU) beta_tensor->toGPU();
+            betaDev = beta_tensor->data<float>();
+        }
 
         kernels::launchSimplifiedLayerNorm(
             X->data<float>(), gammaDev, betaDev, Y->data<float>(), (int)M, (int)N, epsilon, /*stream*/0);

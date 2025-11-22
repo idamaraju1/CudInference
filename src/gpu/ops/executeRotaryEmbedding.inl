@@ -36,6 +36,15 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
         } else {
             cos_tensor = second;
             sin_tensor = third;
+
+            // If position_ids not provided as node input, look for it in tensor map
+            // This handles models where position_ids aren't connected to RotaryEmbedding nodes
+            if (hasTensor("position_ids")) {
+                position_tensor = getTensor("position_ids");
+                LOG_DEBUG("RotaryEmbedding: Using position_ids from tensor map (not node input)");
+            } else {
+                LOG_ERROR("RotaryEmbedding: WARNING - No position_ids available! Will use incorrect fallback.");
+            }
         }
     } else if (inputs.size() == 5) {
         // Some exporter order: X, position_ids, cos, sin, (unused extra e.g., past_position)
@@ -192,6 +201,11 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
             size_t cols = static_cast<size_t>(cache_shape[1]);
             if (cols < rotary_half) {
                 throw std::runtime_error("RotaryEmbedding: cache " + label + " width is smaller than half rotary dim");
+            }
+
+            if (verbose_ && sequence_length == 1) {
+                int64_t pos = fetchPositionId(0, 0);
+                LOG_DEBUG("RotaryEmbedding: single-token decode using ABSOLUTE position ", pos);
             }
 
             for (size_t b = 0; b < batch; ++b) {

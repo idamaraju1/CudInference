@@ -67,35 +67,68 @@ void GpuExecutor::executeReduceSum(const Node& node) {
     std::vector<int64_t> output_strides = computeStrides(output_shape);
 
     std::vector<uint8_t> cache;
-    const float* host_data = getHostData<float>(input, cache);
 
     size_t total_input = input->size();
-    for (size_t idx = 0; idx < total_input; ++idx) {
-        size_t remainder = idx;
-        std::vector<int64_t> coords(ndim);
-        for (int64_t dim = 0; dim < ndim; ++dim) {
-            coords[dim] = remainder / input_strides[dim];
-            remainder %= input_strides[dim];
-        }
 
-        std::vector<int64_t> out_coords;
-        out_coords.reserve(output_shape.size());
-        for (int64_t dim = 0; dim < ndim; ++dim) {
-            if (reduce_mask[dim]) {
-                if (keepdims) {
-                    out_coords.push_back(0);
-                }
-            } else {
-                out_coords.push_back(coords[dim]);
+    // Handle different data types
+    if (input->dtype() == DataType::INT64) {
+        const int64_t* host_data = getHostData<int64_t>(input, cache);
+        for (size_t idx = 0; idx < total_input; ++idx) {
+            size_t remainder = idx;
+            std::vector<int64_t> coords(ndim);
+            for (int64_t dim = 0; dim < ndim; ++dim) {
+                coords[dim] = remainder / input_strides[dim];
+                remainder %= input_strides[dim];
             }
-        }
 
-        int64_t out_idx = 0;
-        for (size_t dim = 0; dim < out_coords.size(); ++dim) {
-            out_idx += out_coords[dim] * output_strides[dim];
-        }
+            std::vector<int64_t> out_coords;
+            out_coords.reserve(output_shape.size());
+            for (int64_t dim = 0; dim < ndim; ++dim) {
+                if (reduce_mask[dim]) {
+                    if (keepdims) {
+                        out_coords.push_back(0);
+                    }
+                } else {
+                    out_coords.push_back(coords[dim]);
+                }
+            }
 
-        host_output[out_idx] += host_data[idx];
+            int64_t out_idx = 0;
+            for (size_t dim = 0; dim < out_coords.size(); ++dim) {
+                out_idx += out_coords[dim] * output_strides[dim];
+            }
+
+            host_output[out_idx] += static_cast<float>(host_data[idx]);
+        }
+    } else {
+        const float* host_data = getHostData<float>(input, cache);
+        for (size_t idx = 0; idx < total_input; ++idx) {
+            size_t remainder = idx;
+            std::vector<int64_t> coords(ndim);
+            for (int64_t dim = 0; dim < ndim; ++dim) {
+                coords[dim] = remainder / input_strides[dim];
+                remainder %= input_strides[dim];
+            }
+
+            std::vector<int64_t> out_coords;
+            out_coords.reserve(output_shape.size());
+            for (int64_t dim = 0; dim < ndim; ++dim) {
+                if (reduce_mask[dim]) {
+                    if (keepdims) {
+                        out_coords.push_back(0);
+                    }
+                } else {
+                    out_coords.push_back(coords[dim]);
+                }
+            }
+
+            int64_t out_idx = 0;
+            for (size_t dim = 0; dim < out_coords.size(); ++dim) {
+                out_idx += out_coords[dim] * output_strides[dim];
+            }
+
+            host_output[out_idx] += host_data[idx];
+        }
     }
 
     auto output = allocateOutput(output_shape);
