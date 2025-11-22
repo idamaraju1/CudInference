@@ -71,6 +71,19 @@ if(NOT CPU_ONLY)
     )
 endif()
 
+# CPU kernel sources
+set(CPU_KERNEL_SOURCES
+    src/executors/cpu/kernels/add.cpp
+    src/executors/cpu/kernels/matmul.cpp
+    src/executors/cpu/kernels/relu.cpp
+    src/executors/cpu/kernels/sub.cpp
+    src/executors/cpu/kernels/layernorm.cpp
+    src/executors/cpu/kernels/gather.cpp
+    src/executors/cpu/kernels/elementwise.cpp
+    src/executors/cpu/kernels/tensor_ops.cpp
+    src/executors/cpu/kernels/reducemean.cpp
+)
+
 # GPU sources (only if GPU build)
 set(GPU_SOURCES 
     src/gpu/autoregressive_generator.cpp)
@@ -82,15 +95,15 @@ if(NOT CPU_ONLY)
     )
 
     set(CUDA_SOURCES
-        src/gpu/kernels/matmul.cu
-        src/gpu/kernels/relu.cu
-        src/gpu/kernels/add.cu
-        src/gpu/kernels/gather.cu
-        src/gpu/kernels/elementwise.cu
-        src/gpu/kernels/reducemean.cu
-        src/gpu/kernels/tensor_ops.cu
-        src/gpu/kernels/layernorm.cu
-        src/gpu/kernels/sub.cu
+        src/executors/gpu/kernels/matmul.cu
+        src/executors/gpu/kernels/relu.cu
+        src/executors/gpu/kernels/add.cu
+        src/executors/gpu/kernels/gather.cu
+        src/executors/gpu/kernels/elementwise.cu
+        src/executors/gpu/kernels/reducemean.cu
+        src/executors/gpu/kernels/tensor_ops.cu
+        src/executors/gpu/kernels/layernorm.cu
+        src/executors/gpu/kernels/sub.cu
     )
 endif()
 
@@ -100,6 +113,7 @@ add_executable(onnx_gpu_engine
     ${CORE_SOURCES}
     ${UTILS_SOURCES}
     ${EXECUTOR_SOURCES}
+    ${CPU_KERNEL_SOURCES}
     ${GPU_SOURCES}
     ${CUDA_SOURCES}
 )

@@ -1,5 +1,6 @@
 #include "gpu_executor.hpp"
-#include "../gpu/kernels/kernels.cuh"
+#include "gpu/kernels/gpu_kernels.cuh"
+#include "cpu/kernels/cpu_kernels.h"
 #include "../utils/logger.hpp"
 #include "../utils/tensor/gpu_tensor.hpp"
 #include "../utils/tensor/cpu_tensor.hpp"
@@ -904,7 +905,7 @@ void GpuExecutor::executeGemm(const Node& node) {
         const float* a_data = getHostData<float>(A, cache);
         
         auto A_op_cpu = std::make_shared<CpuTensor>(std::vector<int64_t>{M, K}, A->dtype());
-        transposeMatrix(a_data, A_op_cpu->data_ptr<float>(), A->dim(0), A->dim(1), true);
+        transposeMatrix(a_data, A_op_cpu->data_ptr<float>(), A->dim(0), A->dim(1));
         A_op = A_op_cpu->toGPU();
     }
 
@@ -914,7 +915,7 @@ void GpuExecutor::executeGemm(const Node& node) {
         const float* b_data = getHostData<float>(B, cache);
         
         auto B_op_cpu = std::make_shared<CpuTensor>(std::vector<int64_t>{K, N}, B->dtype());
-        transposeMatrix(b_data, B_op_cpu->data_ptr<float>(), B->dim(0), B->dim(1), true);
+        transposeMatrix(b_data, B_op_cpu->data_ptr<float>(), B->dim(0), B->dim(1));
         B_op = B_op_cpu->toGPU();
     }
 
@@ -938,60 +939,39 @@ void GpuExecutor::executeGemm(const Node& node) {
     tensors_[node.outputs()[0]] = Y;
 }
 
-// TODO: Convert remaining operations to GPU-only
-// For now, these still include CPU fallback logic and need to be updated
-// They reference use_cpu_fallback_ and num_cpu_threads_ which don't exist in pure GPU executor
-//
-// Temporary workaround: Define stub variables so included .inl files compile
-// These will be removed as operations are converted to pure GPU versions
-// Static file-scope variables accessible to included .inl files
-static bool use_cpu_fallback_ = false;  // Always use GPU
-static int num_cpu_threads_ = 0;         // No CPU threads needed
+// Include GPU-only operation implementations
+#include "gpu/ops/executeGather.inl"
+#include "gpu/ops/executeMul.inl"
+#include "gpu/ops/executeDiv.inl"
+#include "gpu/ops/executePow.inl"
+#include "gpu/ops/executeReduceMean.inl"
+#include "gpu/ops/executeReshape.inl"
+#include "gpu/ops/executeTranspose.inl"
+#include "gpu/ops/executeUnsqueeze.inl"
+#include "gpu/ops/executeSlice.inl"
+#include "gpu/ops/executeConcat.inl"
+#include "gpu/ops/executeShape.inl"
+#include "gpu/ops/executeCast.inl"
+#include "gpu/ops/executeRange.inl"
+#include "gpu/ops/executeEqual.inl"
+#include "gpu/ops/executeConstantOfShape.inl"
+#include "gpu/ops/executeExpand.inl"
+#include "gpu/ops/executeGreater.inl"
+#include "gpu/ops/executeNeg.inl"
+#include "gpu/ops/executeSigmoid.inl"
+#include "gpu/ops/executeSin.inl"
+#include "gpu/ops/executeCos.inl"
+#include "gpu/ops/executeSoftmax.inl"
+#include "gpu/ops/executeScatterND.inl"
+#include "gpu/ops/executeTrilu.inl"
+#include "gpu/ops/executeWhere.inl"
+#include "gpu/ops/executeReduceSum.inl"
+#include "gpu/ops/executeSimplifiedLayerNormalization.inl"
+#include "gpu/ops/executeSkipSimplifiedLayerNormalization.inl"
+#include "gpu/ops/executeSqrt.inl"
+#include "gpu/ops/executeRotaryEmbedding.inl"
+#include "gpu/ops/executeGroupQueryAttention.inl"
 
-// Temporary: Include from old location (will be replaced with GPU-only versions)
-#include "../gpu/ops/executeGather.inl"
-#include "../gpu/ops/executeMul.inl"
-#include "../gpu/ops/executeDiv.inl"
-#include "../gpu/ops/executePow.inl"
-#include "../gpu/ops/executeReduceMean.inl"
-#include "../gpu/ops/executeReshape.inl"
-#include "../gpu/ops/executeTranspose.inl"
-#include "../gpu/ops/executeUnsqueeze.inl"
-#include "../gpu/ops/executeSlice.inl"
-#include "../gpu/ops/executeConcat.inl"
-#include "../gpu/ops/executeShape.inl"
-#include "../gpu/ops/executeCast.inl"
-#include "../gpu/ops/executeRange.inl"
-#include "../gpu/ops/executeEqual.inl"
-#include "../gpu/ops/executeConstantOfShape.inl"
-#include "../gpu/ops/executeExpand.inl"
-#include "../gpu/ops/executeGreater.inl"
-#include "../gpu/ops/executeNeg.inl"
-#include "../gpu/ops/executeSigmoid.inl"
-#include "../gpu/ops/executeSin.inl"
-#include "../gpu/ops/executeCos.inl"
-#include "../gpu/ops/executeSoftmax.inl"
-#include "../gpu/ops/executeScatterND.inl"
-#include "../gpu/ops/executeTrilu.inl"
-#include "../gpu/ops/executeWhere.inl"
-#include "../gpu/ops/executeReduceSum.inl"
-#include "../gpu/ops/executeSimplifiedLayerNormalization.inl"
-#include "../gpu/ops/executeSkipSimplifiedLayerNormalization.inl"
-#include "../gpu/ops/executeSqrt.inl"
-#include "../gpu/ops/executeRotaryEmbedding.inl"
-#include "../gpu/ops/executeGroupQueryAttention.inl"
-
-// Helper: transpose a matrix (CPU-based, used for transpose operations)
-void GpuExecutor::transposeMatrix(const float* input, float* output, int rows, int cols, bool use_cpu) {
-    // Simple CPU-based matrix transpose
-    // Note: use_cpu parameter is kept for compatibility but always true in GPU executor
-    // (transpose happens on CPU then data is copied to GPU)
-    for (int i = 0; i < rows; ++i) {
-        for (int j = 0; j < cols; ++j) {
-            output[j * rows + i] = input[i * cols + j];
-        }
-    }
-}
 
 } // namespace onnx_runner
 

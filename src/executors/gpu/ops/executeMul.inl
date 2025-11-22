@@ -23,34 +23,22 @@ void GpuExecutor::executeMul(const Node& node) {
                 A->toCPU();
             }
             float scalar = A->data_ptr<float>()[0];
-            if (use_cpu_fallback_) {
-                #pragma omp parallel for num_threads(num_cpu_threads_)
-                for (int i = 0; i < size; ++i) {
-                    output->data_ptr<float>()[i] = B->data_ptr<float>()[i] * scalar;
-                }
-            } else {
-                launchMulScalarKernel(B->data_ptr<float>(), scalar, output->data_ptr<float>(), size);
+            if (A->device() == DeviceType::CPU) {
+                A->toGPU();
             }
+            launchMulScalarKernel(B->data_ptr<float>(), scalar, output->data_ptr<float>(), size);
         } else if (B_is_scalar) {
             // Move B to CPU to read the scalar value
             if (B->device() == DeviceType::CUDA) {
                 B->toCPU();
             }
             float scalar = B->data_ptr<float>()[0];
-            if (use_cpu_fallback_) {
-                #pragma omp parallel for num_threads(num_cpu_threads_)
-                for (int i = 0; i < size; ++i) {
-                    output->data_ptr<float>()[i] = A->data_ptr<float>()[i] * scalar;
-                }
-            } else {
-                launchMulScalarKernel(A->data_ptr<float>(), scalar, output->data_ptr<float>(), size);
+            if (B->device() == DeviceType::CPU) {
+                B->toGPU();
             }
+            launchMulScalarKernel(A->data_ptr<float>(), scalar, output->data_ptr<float>(), size);
         } else {
-            if (use_cpu_fallback_) {
-                mulCPU(A->data_ptr<float>(), B->data_ptr<float>(), output->data_ptr<float>(), size, num_cpu_threads_);
-            } else {
-                launchMulKernel(A->data_ptr<float>(), B->data_ptr<float>(), output->data_ptr<float>(), size);
-            }
+            launchMulKernel(A->data_ptr<float>(), B->data_ptr<float>(), output->data_ptr<float>(), size);
         }
 
         tensors_[node.outputs()[0]] = output;
@@ -95,19 +83,14 @@ void GpuExecutor::executeMul(const Node& node) {
         broadcastB = expandedB.data();
     }
 
-    if (use_cpu_fallback_) {
-        float* dst = output->data_ptr<float>();
-        for (size_t i = 0; i < total; ++i) {
-            dst[i] = broadcastA[i] * broadcastB[i];
-        }
-    } else {
-        std::vector<float> host_output(total);
-        for (size_t i = 0; i < total; ++i) {
-            host_output[i] = broadcastA[i] * broadcastB[i];
-        }
-        CUDA_CHECK(cudaMemcpy(output->data_ptr<float>(), host_output.data(),
-                              total * sizeof(float), cudaMemcpyHostToDevice));
+    // Compute on CPU then copy to GPU
+    std::vector<float> host_output(total);
+    for (size_t i = 0; i < total; ++i) {
+        host_output[i] = broadcastA[i] * broadcastB[i];
     }
+    CUDA_CHECK(cudaMemcpy(output->data_ptr<float>(), host_output.data(),
+                          total * sizeof(float), cudaMemcpyHostToDevice));
 
     tensors_[node.outputs()[0]] = output;
 }
+

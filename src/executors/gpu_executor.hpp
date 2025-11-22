@@ -117,8 +117,6 @@ private:
     void executeGroupQueryAttention(const Node& node);
     void executeSkipSimplifiedLayerNormalization(const Node& node);
 
-    // Helper: transpose a matrix
-    void transposeMatrix(const float* input, float* output, int rows, int cols, bool use_cpu);
 };
 
 } // namespace onnx_runner

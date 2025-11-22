@@ -163,6 +163,22 @@ protected:
         }
         return outputs;
     }
+
+    /**
+     * Transpose a matrix.
+     * 
+     * @param input The input matrix
+     * @param output The output matrix
+     * @param rows The number of rows in the matrix
+     * @param cols The number of columns in the matrix
+     */
+    virtual void transposeMatrix(const float* input, float* output, int rows, int cols) {
+        for (int i = 0; i < rows; ++i) {
+            for (int j = 0; j < cols; ++j) {
+                output[j * rows + i] = input[i * cols + j];
+            }
+        }
+    }
 };
 
 } // namespace onnx_runner
