@@ -35,7 +35,7 @@ void GpuExecutor::executeWhere(const Node& node) {
 
     auto cond_values = tensorToBoolVector(condition);
     DataType out_dtype = promoteDataType(A->dtype(), B->dtype());
-    auto output = std::make_shared<Tensor>(A->shape(), out_dtype);
+    auto output = std::make_shared<CpuTensor>(A->shape(), out_dtype);
 
     auto selectAndStore = [&](auto dummy) {
         using T = decltype(dummy);
@@ -45,7 +45,7 @@ void GpuExecutor::executeWhere(const Node& node) {
         std::vector<T> convB;
         const T* a_ptr = getDataAs<T>(A, cacheA, convA);
         const T* b_ptr = getDataAs<T>(B, cacheB, convB);
-        T* dst = output->ptr_data<T>();
+        T* dst = output->data_ptr<T>();
         for (size_t i = 0; i < cond_values.size(); ++i) {
             dst[i] = cond_values[i] ? a_ptr[i] : b_ptr[i];
         }

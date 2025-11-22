@@ -9,9 +9,9 @@ void GpuExecutor::executeGreater(const Node& node) {
     if (!computeBroadcastShape(A->shape(), B->shape(), output_shape))
         throw std::runtime_error("Greater: operands have incompatible shapes");
 
-    auto output = std::make_shared<Tensor>(output_shape, DataType::UINT8);
+    auto output = std::make_shared<CpuTensor>(output_shape, DataType::UINT8);
     size_t out_size = computeSizeFromShape(output_shape);
-    uint8_t* out_ptr = output->ptr_data<uint8_t>();
+    uint8_t* out_ptr = output->data_ptr<uint8_t>();
 
     DataType compare_dtype = promoteDataType(A->dtype(), B->dtype());
 

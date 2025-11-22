@@ -29,19 +29,19 @@ void GpuExecutor::executeRange(const Node& node) {
 
         switch (output_dtype) {
             case DataType::FLOAT32:
-                fillRangeValues<float>(output->ptr_data<float>(),
+                fillRangeValues<float>(output->data_ptr<float>(),
                                        element_count,
                                        static_cast<float>(start_val),
                                        static_cast<float>(delta_val));
                 break;
             case DataType::INT32:
-                fillRangeValues<int32_t>(output->ptr_data<int32_t>(),
+                fillRangeValues<int32_t>(output->data_ptr<int32_t>(),
                                          element_count,
                                          static_cast<int32_t>(start_val),
                                          static_cast<int32_t>(delta_val));
                 break;
             case DataType::INT64:
-                fillRangeValues<int64_t>(output->ptr_data<int64_t>(),
+                fillRangeValues<int64_t>(output->data_ptr<int64_t>(),
                                          element_count,
                                          static_cast<int64_t>(start_val),
                                          static_cast<int64_t>(delta_val));

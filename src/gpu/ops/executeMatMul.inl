@@ -25,14 +25,14 @@ void GpuExecutor::executeMatMul(const Node& node) {
 
         if (use_cpu_fallback_) {
             if (num_cpu_threads_ > 1) {
-                kernels::matmulCPUMultiThreaded(A->ptr_data<float>(), B->ptr_data<float>(), Y->ptr_data<float>(),
+                kernels::matmulCPUMultiThreaded(A->data_ptr<float>(), B->data_ptr<float>(), Y->data_ptr<float>(),
                                                M, K, N, num_cpu_threads_);
             } else {
-                kernels::matmulCPU(A->ptr_data<float>(), B->ptr_data<float>(), Y->ptr_data<float>(),
+                kernels::matmulCPU(A->data_ptr<float>(), B->data_ptr<float>(), Y->data_ptr<float>(),
                                   M, K, N);
             }
         } else {
-            kernels::launchMatMul(A->ptr_data<float>(), B->ptr_data<float>(), Y->ptr_data<float>(),
+            kernels::launchMatMul(A->data_ptr<float>(), B->data_ptr<float>(), Y->data_ptr<float>(),
                                  M, K, N);
             CUDA_CHECK(cudaDeviceSynchronize());
         }
@@ -128,9 +128,9 @@ void GpuExecutor::executeMatMul(const Node& node) {
 
     size_t bytes = host_output.size() * sizeof(float);
     if (use_cpu_fallback_) {
-        std::memcpy(Y->ptr_data<float>(), host_output.data(), bytes);
+        std::memcpy(Y->data_ptr<float>(), host_output.data(), bytes);
     } else {
-        CUDA_CHECK(cudaMemcpy(Y->ptr_data<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
+        CUDA_CHECK(cudaMemcpy(Y->data_ptr<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
     }
 
     tensors_[node.outputs()[0]] = Y;

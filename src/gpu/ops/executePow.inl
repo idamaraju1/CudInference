@@ -18,10 +18,10 @@ void GpuExecutor::executePow(const Node& node) {
             if (B->device() == DeviceType::CUDA) {
                 B->toCPU();
             }
-            float exponent = B->ptr_data<float>()[0];
-            launchPowScalarKernel(A->ptr_data<float>(), exponent, output->ptr_data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
+            float exponent = B->data_ptr<float>()[0];
+            launchPowScalarKernel(A->data_ptr<float>(), exponent, output->data_ptr<float>(), size, use_cpu_fallback_, num_cpu_threads_);
         } else {
-            launchPowKernel(A->ptr_data<float>(), B->ptr_data<float>(), output->ptr_data<float>(), size, use_cpu_fallback_, num_cpu_threads_);
+            launchPowKernel(A->data_ptr<float>(), B->data_ptr<float>(), output->data_ptr<float>(), size, use_cpu_fallback_, num_cpu_threads_);
         }
 
         tensors_[node.outputs()[0]] = output;

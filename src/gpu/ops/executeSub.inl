@@ -18,17 +18,17 @@ void GpuExecutor::executeSub(const Node& node) {
             if (B->device() == DeviceType::CUDA) {
                 B->toCPU();
             }
-            float scalar = B->ptr_data<float>()[0];
+            float scalar = B->data_ptr<float>()[0];
 
             if (use_cpu_fallback_) {
                 for (int i = 0; i < size; ++i) {
-                    C->ptr_data<float>()[i] = A->ptr_data<float>()[i] - scalar;
+                    C->data_ptr<float>()[i] = A->data_ptr<float>()[i] - scalar;
                 }
             } else {
                 if (B->device() == DeviceType::CPU) {
                     B->toGPU();
                 }
-                kernels::launchSubScalar(A->ptr_data<float>(), scalar, C->ptr_data<float>(), size);
+                kernels::launchSubScalar(A->data_ptr<float>(), scalar, C->data_ptr<float>(), size);
                 CUDA_CHECK(cudaDeviceSynchronize());
             }
 
@@ -47,12 +47,12 @@ void GpuExecutor::executeSub(const Node& node) {
     // Execute
     if (use_cpu_fallback_) {
         if (num_cpu_threads_ > 1) {
-            kernels::subCPUMultiThreaded(A->ptr_data<float>(), B->ptr_data<float>(), C->ptr_data<float>(), size, num_cpu_threads_);
+            kernels::subCPUMultiThreaded(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size, num_cpu_threads_);
         } else {
-            kernels::subCPU(A->ptr_data<float>(), B->ptr_data<float>(), C->ptr_data<float>(), size);
+            kernels::subCPU(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size);
         }
     } else {
-        kernels::launchSub(A->ptr_data<float>(), B->ptr_data<float>(), C->ptr_data<float>(), size);
+        kernels::launchSub(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size);
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 

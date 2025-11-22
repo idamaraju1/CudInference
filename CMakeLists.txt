@@ -17,7 +17,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 if(NOT CPU_ONLY)
     set(CMAKE_CUDA_STANDARD 14)
     set(CMAKE_CUDA_STANDARD_REQUIRED ON)
-    set(CMAKE_CUDA_ARCHITECTURES "75;86;89")  # Adjust as needed
+    set(CMAKE_CUDA_ARCHITECTURES "75;86;89;61")  # Adjust as needed
 endif()
 
 # Define CPU_ONLY macro in source code if enabled
@@ -55,6 +55,11 @@ set(UTILS_SOURCES
     src/utils/logger.cpp
     src/utils/tensor/cpu_tensor.cpp
 )
+if(NOT CPU_ONLY)
+    list(APPEND UTILS_SOURCES
+        src/utils/tensor/gpu_tensor.cpp
+    )
+endif()
 
 # Executor sources
 set(EXECUTOR_SOURCES
@@ -72,7 +77,6 @@ set(GPU_SOURCES
 set(CUDA_SOURCES "")
 if(NOT CPU_ONLY)
     set(GPU_SOURCES
-        src/gpu/gpu_executor.cpp
         src/gpu/benchmark.cpp
         src/gpu/autoregressive_generator.cpp
     )

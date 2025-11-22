@@ -15,10 +15,10 @@ void GpuExecutor::executeScatterND(const Node& node) {
         throw std::runtime_error("ScatterND indices must be INT64 or INT32");
     }
 
-    auto output = std::make_shared<Tensor>(data->shape(), DataType::FLOAT32);
+    auto output = std::make_shared<CpuTensor>(data->shape(), DataType::FLOAT32);
     std::vector<uint8_t> data_cache;
     const float* data_ptr = getHostData<float>(data, data_cache);
-    std::memcpy(output->ptr_data<float>(), data_ptr, data->size() * sizeof(float));
+    std::memcpy(output->data_ptr<float>(), data_ptr, data->size() * sizeof(float));
 
     std::vector<uint8_t> indices_cache;
     std::vector<int64_t> indices_values(indices->size());
@@ -51,7 +51,7 @@ void GpuExecutor::executeScatterND(const Node& node) {
     }
 
     auto strides = computeStrides(data->shape());
-    float* out_ptr = output->ptr_data<float>();
+    float* out_ptr = output->data_ptr<float>();
 
     for (int64_t update_idx = 0; update_idx < num_updates; ++update_idx) {
         int64_t base_offset = 0;

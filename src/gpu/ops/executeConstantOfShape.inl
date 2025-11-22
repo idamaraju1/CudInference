@@ -20,7 +20,7 @@ void GpuExecutor::executeConstantOfShape(const Node& node) {
         total_elems *= dim;
     }
 
-    auto output = std::make_shared<Tensor>(output_shape, output_dtype);
+    auto output = std::make_shared<CpuTensor>(output_shape, output_dtype);
 
     auto fillDefault = [&](auto dummy) {
         using T = decltype(dummy);
@@ -29,9 +29,9 @@ void GpuExecutor::executeConstantOfShape(const Node& node) {
             if (value_attr->size() != 1) {
                 throw std::runtime_error("ConstantOfShape: value attribute must be a scalar");
             }
-            value = value_attr->ptr_data<T>()[0];
+            value = value_attr->data_ptr<T>()[0];
         }
-        fillTensorWithValue(output->ptr_data<T>(), total_elems, value);
+        fillTensorWithValue(output->data_ptr<T>(), total_elems, value);
     };
 
     switch (output_dtype) {

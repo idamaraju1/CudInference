@@ -5,6 +5,8 @@
 #include "../executors/gpu_executor.hpp"
 #endif
 
+#include "../utils/tensor/cpu_tensor.hpp"
+#include "../utils/tensor/gpu_tensor.hpp"
 #include "../utils/logger.hpp"
 #include <iostream>
 #include <iomanip>
@@ -281,14 +283,14 @@ BenchmarkExecutor::runBenchmark(const Graph& graph,
         }
 
         // TODO - add multiple threads and such
-        CpuExecutor cpu_executor();
+        CpuExecutor cpu_executor;
         cpu_executor.setVerbose(false);
 
         // Create inputs for this run
         std::map<std::string, std::shared_ptr<Tensor>> cpu_inputs;
         for (const auto& [name, tensor] : inputs) {
-            auto cpu_tensor = std::make_shared<Tensor>(tensor->shape(), tensor->dtype());
-            std::memcpy(cpu_tensor->data<float>(), tensor->data<float>(),
+            auto cpu_tensor = std::make_shared<CpuTensor>(tensor->shape(), tensor->dtype());
+            std::memcpy(cpu_tensor->data_ptr<float>(), tensor->data_ptr<float>(),
                        tensor->size() * sizeof(float));
             cpu_inputs[name] = cpu_tensor;
         }
@@ -309,13 +311,13 @@ BenchmarkExecutor::runBenchmark(const Graph& graph,
                   << "] Running on GPU..." << colors::RESET << "\n\n";
     }
 
-    GpuExecutor gpu_executor(false);
+    GpuExecutor gpu_executor;
     gpu_executor.setVerbose(false);
 
     std::map<std::string, std::shared_ptr<Tensor>> gpu_inputs;
     for (const auto& [name, tensor] : inputs) {
-        auto gpu_tensor = std::make_shared<Tensor>(tensor->shape(), tensor->dtype());
-        std::memcpy(gpu_tensor->data<float>(), tensor->data<float>(),
+        auto gpu_tensor = std::make_shared<GpuTensor>(tensor->shape(), tensor->dtype());
+        std::memcpy(gpu_tensor->data_ptr<float>(), tensor->data_ptr<float>(),
                    tensor->size() * sizeof(float));
         gpu_inputs[name] = gpu_tensor;
     }

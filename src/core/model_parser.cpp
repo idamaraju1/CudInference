@@ -91,12 +91,10 @@ std::shared_ptr<Graph> ModelParser::parse(const std::string& model_path) {
 
             if (!shape.empty()) {
                 graph->addInput(name, shape);
-                // TODO
-                // LOG_DEBUG("  Input: ", name, " shape: ", Tensor(shape).shapeStr());
+                LOG_DEBUG("  Input: ", name, " shape: ", CpuTensor(shape).shapeStr());
             } else {
                 graph->addInput(name);
-                // TODO
-                // LOG_DEBUG("  Input: ", name, " (no shape info)");
+                LOG_DEBUG("  Input: ", name, " (no shape info)");
             }
         }
     }
@@ -282,8 +280,7 @@ std::shared_ptr<Tensor> ModelParser::parseSparseTensorProto(const void* proto_pt
         total_size *= dim;
     }
 
-    // TODO
-    // LOG_DEBUG("  Sparse tensor shape: ", Tensor(shape).shapeStr(), ", total elements: ", total_size);
+    LOG_DEBUG("  Sparse tensor shape: ", CpuTensor(shape).shapeStr(), ", total elements: ", total_size);
 
     // Parse the values tensor (contains NNZ non-zero elements)
     if (!sparse_proto->has_values()) {

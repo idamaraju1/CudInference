@@ -1,5 +1,5 @@
 #include "cpu_tensor.hpp"
-#ifdef USE_GPU
+#ifndef CPU_ONLY
 #include "gpu_tensor.hpp"
 #include <cuda_runtime.h>
 #endif

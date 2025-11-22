@@ -16,10 +16,10 @@ void GpuExecutor::executeSoftmax(const Node& node) {
         throw std::runtime_error("Softmax: axis out of range");
     }
 
-    auto output = std::make_shared<Tensor>(input->shape(), DataType::FLOAT32);
+    auto output = std::make_shared<CpuTensor>(input->shape(), DataType::FLOAT32);
     std::vector<uint8_t> cache;
     const float* src = getHostData<float>(input, cache);
-    float* dst = output->ptr_data<float>();
+    float* dst = output->data_ptr<float>();
 
     int64_t axis_dim = input->dim(axis);
     int64_t outer = 1;

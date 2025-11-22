@@ -7,7 +7,7 @@ void GpuExecutor::executeSqrt(const Node& node) {
     auto A = getTensor(node.inputs()[0]);
     auto output = allocateOutput(A->shape());
 
-    launchSqrtKernel(A->ptr_data<float>(), output->ptr_data<float>(), A->size(), use_cpu_fallback_, num_cpu_threads_);
+    launchSqrtKernel(A->data_ptr<float>(), output->data_ptr<float>(), A->size(), use_cpu_fallback_, num_cpu_threads_);
 
     tensors_[node.outputs()[0]] = output;
 }

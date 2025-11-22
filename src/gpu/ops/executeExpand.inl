@@ -75,8 +75,8 @@ void GpuExecutor::executeExpand(const Node& node) {
         case DataType::FLOAT32: {
             std::vector<uint8_t> cache;
             const float* src = getHostData<float>(input, cache);
-            auto output = std::make_shared<Tensor>(output_shape, DataType::FLOAT32);
-            broadcastCopy(src, output->ptr_data<float>(), input->shape(), output_shape);
+            auto output = std::make_shared<CpuTensor>(output_shape, DataType::FLOAT32);
+            broadcastCopy(src, output->data_ptr<float>(), input->shape(), output_shape);
             if (!use_cpu_fallback_) output->toGPU();
             tensors_[node.outputs()[0]] = output;
             break;
@@ -84,8 +84,8 @@ void GpuExecutor::executeExpand(const Node& node) {
         case DataType::INT32: {
             std::vector<uint8_t> cache;
             const int32_t* src = getHostData<int32_t>(input, cache);
-            auto output = std::make_shared<Tensor>(output_shape, DataType::INT32);
-            broadcastCopy(src, output->ptr_data<int32_t>(), input->shape(), output_shape);
+            auto output = std::make_shared<CpuTensor>(output_shape, DataType::INT32);
+            broadcastCopy(src, output->data_ptr<int32_t>(), input->shape(), output_shape);
             if (!use_cpu_fallback_) output->toGPU();
             tensors_[node.outputs()[0]] = output;
             break;
@@ -93,8 +93,8 @@ void GpuExecutor::executeExpand(const Node& node) {
         case DataType::INT64: {
             std::vector<uint8_t> cache;
             const int64_t* src = getHostData<int64_t>(input, cache);
-            auto output = std::make_shared<Tensor>(output_shape, DataType::INT64);
-            broadcastCopy(src, output->ptr_data<int64_t>(), input->shape(), output_shape);
+            auto output = std::make_shared<CpuTensor>(output_shape, DataType::INT64);
+            broadcastCopy(src, output->data_ptr<int64_t>(), input->shape(), output_shape);
             if (!use_cpu_fallback_) output->toGPU();
             tensors_[node.outputs()[0]] = output;
             break;
@@ -102,8 +102,8 @@ void GpuExecutor::executeExpand(const Node& node) {
         case DataType::UINT8: {
             std::vector<uint8_t> cache;
             const uint8_t* src = getHostData<uint8_t>(input, cache);
-            auto output = std::make_shared<Tensor>(output_shape, DataType::UINT8);
-            broadcastCopy(src, output->ptr_data<uint8_t>(), input->shape(), output_shape);
+            auto output = std::make_shared<CpuTensor>(output_shape, DataType::UINT8);
+            broadcastCopy(src, output->data_ptr<uint8_t>(), input->shape(), output_shape);
             if (!use_cpu_fallback_) output->toGPU();
             tensors_[node.outputs()[0]] = output;
             break;

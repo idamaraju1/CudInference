@@ -7,6 +7,7 @@
 #include <sstream>
 #include <array>
 #include <cstdio>
+#include <cstring>
 
 #include "core/model_parser.hpp"
 #include "core/graph.hpp"
@@ -349,9 +350,8 @@ int main(int argc, char** argv) {
                     #else
                         auto tensor = std::make_shared<GpuTensor>(shape, DataType::INT64);
                     #endif
-                    // TODO
-                    // std::memcpy(tensor->data<int64_t>(), token_ids.data(),
-                    //             token_ids.size() * sizeof(int64_t));
+                    std::memcpy(tensor->data_ptr<int64_t>(), token_ids.data(),
+                                token_ids.size() * sizeof(int64_t));
                     inputs[input_name] = tensor;
 
                     LOG_INFO("Tokenized input text: '", user_input_text, "'");
@@ -396,23 +396,27 @@ int main(int argc, char** argv) {
         BenchmarkResults bench_results;
 
         if (benchmark) {
-            // TODO: benchmark requires GPU
-            // // Run benchmark mode
-            // BenchmarkExecutor bench_executor(cpu_threads);
-            // auto [results, bench_outputs] = bench_executor.runBenchmark(*graph, inputs, true);
-            // outputs = bench_outputs;
-            // bench_results = results;
+            // Run benchmark mode
+            #ifdef USE_CPU
+            BenchmarkExecutor bench_executor(cpu_threads);
+            auto [results, bench_outputs] = bench_executor.runBenchmark(*graph, inputs, true);
+            outputs = bench_outputs;
+            bench_results = results;
 
-            // // Save to JSON (default to results.json if not specified)
-            // std::string json_output = output_file.empty() ? "results.json" : output_file;
-            // std::ofstream out(json_output);
-            // if (out.is_open()) {
-            //     out << bench_results.toJSON();
-            //     out.close();
-            //     LOG_INFO("Benchmark results saved to: ", json_output);
-            // } else {
-            //     LOG_ERROR("Failed to open output file: ", json_output);
-            // }
+            // Save to JSON (default to results.json if not specified)
+            std::string json_output = output_file.empty() ? "results.json" : output_file;
+            std::ofstream out(json_output);
+            if (out.is_open()) {
+                out << bench_results.toJSON();
+                out.close();
+                LOG_INFO("Benchmark results saved to: ", json_output);
+            } else {
+                LOG_ERROR("Failed to open output file: ", json_output);
+            }
+            #else
+                LOG_ERROR("Benchmark mode is not supported on CPU only mode");
+                return 1;
+            #endif
         } else {
             // Normal execution mode
             LOG_INFO("\n=== Executing Graph ===");

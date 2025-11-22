@@ -18,7 +18,7 @@ void GpuExecutor::executeCast(const Node& node) {
         throw std::runtime_error("Cast: FLOAT16 output is not supported yet");
     }
 
-    auto output = std::make_shared<Tensor>(input->shape(), target_dtype);
+    auto output = std::make_shared<CpuTensor>(input->shape(), target_dtype);
     size_t count = input->size();
     std::vector<uint8_t> host_cache;
 

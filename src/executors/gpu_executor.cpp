@@ -2,6 +2,7 @@
 #include "../gpu/kernels/kernels.cuh"
 #include "../utils/logger.hpp"
 #include "../utils/tensor/gpu_tensor.hpp"
+#include "../utils/tensor/cpu_tensor.hpp"
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>
@@ -63,12 +64,12 @@ template <typename SrcT>
 const SrcT* getHostData(const std::shared_ptr<Tensor>& tensor,
                         std::vector<uint8_t>& host_cache) {
     if (tensor->device() == DeviceType::CPU) {
-        return tensor->data<SrcT>();
+        return tensor->data_ptr<SrcT>();
     }
 
     size_t bytes = tensor->size() * sizeof(SrcT);
     host_cache.resize(bytes);
-    CUDA_CHECK(cudaMemcpy(host_cache.data(), tensor->data<SrcT>(), bytes, cudaMemcpyDeviceToHost));
+    CUDA_CHECK(cudaMemcpy(host_cache.data(), tensor->data_ptr<SrcT>(), bytes, cudaMemcpyDeviceToHost));
     return reinterpret_cast<const SrcT*>(host_cache.data());
 }
 
@@ -79,16 +80,16 @@ void dispatchCastToTarget(const SrcT* src,
                           size_t count) {
     switch (target_dtype) {
         case DataType::FLOAT32:
-            castArray(src, output->data<float>(), count);
+            castArray(src, output->data_ptr<float>(), count);
             break;
         case DataType::INT32:
-            castArray(src, output->data<int32_t>(), count);
+            castArray(src, output->data_ptr<int32_t>(), count);
             break;
         case DataType::INT64:
-            castArray(src, output->data<int64_t>(), count);
+            castArray(src, output->data_ptr<int64_t>(), count);
             break;
         case DataType::UINT8:
-            castArray(src, output->data<uint8_t>(), count);
+            castArray(src, output->data_ptr<uint8_t>(), count);
             break;
         case DataType::FLOAT16:
             throw std::runtime_error("Cast: FLOAT16 output not supported in executor");
@@ -164,7 +165,7 @@ void applyUnary(const std::shared_ptr<Tensor>& input,
                 bool move_to_gpu) {
     std::vector<uint8_t> cache;
     const T* src = getHostData<T>(input, cache);
-    T* dst = output->data<T>();
+    T* dst = output->data_ptr<T>();
     for (size_t i = 0; i < input->size(); ++i) {
         dst[i] = func(src[i]);
     }
@@ -490,7 +491,7 @@ std::shared_ptr<Tensor> GpuExecutor::allocateOutput(
     const std::vector<int64_t>& shape,
     DataType dtype) {
     auto tensor = std::make_shared<GpuTensor>(shape, dtype);
-    tensor->allocateGPU();  // Always allocate on GPU
+    tensor->allocate();  // Always allocate on GPU
     return tensor;
 }
 
@@ -514,7 +515,7 @@ void GpuExecutor::initializeInitializers(const Graph& graph) {
 
         // DEBUG: Print first few values (only for CPU FLOAT32 tensors)
         if (tensor->device() == DeviceType::CPU && tensor->dtype() == DataType::FLOAT32 && tensor->size() > 0) {
-            const float* data_ptr = tensor->data<float>();
+            const float* data_ptr = tensor->data_ptr<float>();
             std::string values_str = "[";
             for (size_t i = 0; i < std::min<size_t>(5, tensor->size()); ++i) {
                 values_str += std::to_string(data_ptr[i]);
@@ -553,14 +554,6 @@ GpuExecutor::collectOutputs(const Graph& graph) {
     return outputs;
 }
 
-/**
- * Allocate a tensor on GPU for output.
- */
-std::shared_ptr<Tensor> GpuExecutor::allocateOutput(
-    const std::vector<int64_t>& shape,
-    DataType dtype) {
-    return std::make_shared<GpuTensor>(shape, dtype);
-}
 
 // Must implement pure virtual from base class
 void GpuExecutor::executeNode(const Node& node) {
@@ -695,7 +688,7 @@ void GpuExecutor::executeReLU(const Node& node) {
     LOG_DEBUG("  ReLU: size=", size);
 
     // Always use GPU kernel
-    kernels::launchReLU(X->data<float>(), Y->data<float>(), size);
+    kernels::launchReLU(X->data_ptr<float>(), Y->data_ptr<float>(), size);
     CUDA_CHECK(cudaDeviceSynchronize());
 
     tensors_[node.outputs()[0]] = Y;
@@ -722,7 +715,7 @@ void GpuExecutor::executeAdd(const Node& node) {
             float scalar = b_data[0];
 
             // Use GPU scalar add kernel
-            kernels::launchAddScalar(A->data<float>(), scalar, C->data<float>(), size);
+            kernels::launchAddScalar(A->data_ptr<float>(), scalar, C->data_ptr<float>(), size);
             CUDA_CHECK(cudaDeviceSynchronize());
 
             tensors_[node.outputs()[0]] = C;
@@ -738,7 +731,7 @@ void GpuExecutor::executeAdd(const Node& node) {
     LOG_DEBUG("  Add: size=", size);
 
     // Always use GPU kernel
-    kernels::launchAdd(A->data<float>(), B->data<float>(), C->data<float>(), size);
+    kernels::launchAdd(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size);
     CUDA_CHECK(cudaDeviceSynchronize());
 
     tensors_[node.outputs()[0]] = C;
@@ -765,7 +758,7 @@ void GpuExecutor::executeSub(const Node& node) {
             float scalar = b_data[0];
 
             // Use GPU scalar sub kernel
-            kernels::launchSubScalar(A->data<float>(), scalar, C->data<float>(), size);
+            kernels::launchSubScalar(A->data_ptr<float>(), scalar, C->data_ptr<float>(), size);
             CUDA_CHECK(cudaDeviceSynchronize());
 
             tensors_[node.outputs()[0]] = C;
@@ -781,7 +774,7 @@ void GpuExecutor::executeSub(const Node& node) {
     LOG_DEBUG("  Sub: size=", size);
 
     // Always use GPU kernel
-    kernels::launchSub(A->data<float>(), B->data<float>(), C->data<float>(), size);
+    kernels::launchSub(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size);
     CUDA_CHECK(cudaDeviceSynchronize());
 
     tensors_[node.outputs()[0]] = C;
@@ -813,7 +806,7 @@ void GpuExecutor::executeMatMul(const Node& node) {
         LOG_DEBUG("  MatMul: (", M, ", ", K, ") @ (", K, ", ", N, ") -> (", M, ", ", N, ")");
 
         // Always use GPU kernel
-        kernels::launchMatMul(A->data<float>(), B->data<float>(), Y->data<float>(),
+        kernels::launchMatMul(A->data_ptr<float>(), B->data_ptr<float>(), Y->data_ptr<float>(),
                              M, K, N);
         CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -911,7 +904,7 @@ void GpuExecutor::executeGemm(const Node& node) {
         const float* a_data = getHostData<float>(A, cache);
         
         auto A_op_cpu = std::make_shared<CpuTensor>(std::vector<int64_t>{M, K}, A->dtype());
-        transposeMatrix(a_data, A_op_cpu->data<float>(), A->dim(0), A->dim(1), true);
+        transposeMatrix(a_data, A_op_cpu->data_ptr<float>(), A->dim(0), A->dim(1), true);
         A_op = A_op_cpu->toGPU();
     }
 
@@ -921,14 +914,14 @@ void GpuExecutor::executeGemm(const Node& node) {
         const float* b_data = getHostData<float>(B, cache);
         
         auto B_op_cpu = std::make_shared<CpuTensor>(std::vector<int64_t>{K, N}, B->dtype());
-        transposeMatrix(b_data, B_op_cpu->data<float>(), B->dim(0), B->dim(1), true);
+        transposeMatrix(b_data, B_op_cpu->data_ptr<float>(), B->dim(0), B->dim(1), true);
         B_op = B_op_cpu->toGPU();
     }
 
     auto Y = allocateOutput({M, N});
 
     // Always use GPU kernel
-    kernels::launchMatMul(A_op->data<float>(), B_op->data<float>(), Y->data<float>(),
+    kernels::launchMatMul(A_op->data_ptr<float>(), B_op->data_ptr<float>(), Y->data_ptr<float>(),
                          M, K, N);
     CUDA_CHECK(cudaDeviceSynchronize());
 
@@ -938,29 +931,11 @@ void GpuExecutor::executeGemm(const Node& node) {
         int size = Y->size();
 
         // Always use GPU kernel
-        kernels::launchAdd(Y->data<float>(), C->data<float>(), Y->data<float>(), size);
+        kernels::launchAdd(Y->data_ptr<float>(), C->data_ptr<float>(), Y->data_ptr<float>(), size);
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 
     tensors_[node.outputs()[0]] = Y;
-}
-
-// GPU-only operation implementations (continued)
-
-void GpuExecutor::executeSqrt(const Node& node) {
-    // Sqrt: Y = sqrt(A)
-    if (node.inputs().size() != 1 || node.outputs().size() != 1) {
-        throw std::runtime_error("Sqrt expects 1 input and 1 output");
-    }
-
-    auto A = getTensor(node.inputs()[0]);
-    auto output = allocateOutput(A->shape());
-
-    // Always use GPU kernel (pass false for use_cpu, 0 for num_threads)
-    kernels::launchSqrtKernel(A->data<float>(), output->data<float>(), A->size(), false, 0);
-    CUDA_CHECK(cudaDeviceSynchronize());
-
-    tensors_[node.outputs()[0]] = output;
 }
 
 // TODO: Convert remaining operations to GPU-only
@@ -1002,6 +977,7 @@ static int num_cpu_threads_ = 0;         // No CPU threads needed
 #include "../gpu/ops/executeReduceSum.inl"
 #include "../gpu/ops/executeSimplifiedLayerNormalization.inl"
 #include "../gpu/ops/executeSkipSimplifiedLayerNormalization.inl"
+#include "../gpu/ops/executeSqrt.inl"
 #include "../gpu/ops/executeRotaryEmbedding.inl"
 #include "../gpu/ops/executeGroupQueryAttention.inl"
 

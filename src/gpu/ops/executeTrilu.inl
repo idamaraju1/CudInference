@@ -19,7 +19,7 @@ void GpuExecutor::executeTrilu(const Node& node) {
         throw std::runtime_error("Trilu expects input with rank >= 2");
     }
 
-    auto output = std::make_shared<Tensor>(input->shape(), DataType::FLOAT32);
+    auto output = std::make_shared<CpuTensor>(input->shape(), DataType::FLOAT32);
 
     // Handle empty tensors
     if (input->size() == 0) {
@@ -32,7 +32,7 @@ void GpuExecutor::executeTrilu(const Node& node) {
 
     std::vector<uint8_t> cache;
     const float* src = getHostData<float>(input, cache);
-    float* dst = output->ptr_data<float>();
+    float* dst = output->data_ptr<float>();
 
     int64_t rows = input->dim(input->ndim() - 2);
     int64_t cols = input->dim(input->ndim() - 1);

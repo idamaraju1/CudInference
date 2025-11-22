@@ -8,10 +8,10 @@ void GpuExecutor::executeSin(const Node& node) {
         throw std::runtime_error("Sin currently supports FLOAT32 only");
     }
 
-    auto output = std::make_shared<Tensor>(input->shape(), DataType::FLOAT32);
+    auto output = std::make_shared<CpuTensor>(input->shape(), DataType::FLOAT32);
     std::vector<uint8_t> cache;
     const float* src = getHostData<float>(input, cache);
-    float* dst = output->ptr_data<float>();
+    float* dst = output->data_ptr<float>();
 
     for (size_t i = 0; i < input->size(); ++i) {
         dst[i] = std::sin(src[i]);

@@ -17,14 +17,14 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
         auto G = getTensor(node.inputs()[1]);
         if (G) {
             if (use_cpu_fallback_ && G->device() == DeviceType::CUDA) G->toCPU();
-            gamma = G->ptr_data<float>();
+            gamma = G->data_ptr<float>();
         }
     }
     if (node.inputs().size() >= 3) {
         auto B = getTensor(node.inputs()[2]);
         if (B) {
             if (use_cpu_fallback_ && B->device() == DeviceType::CUDA) B->toCPU();
-            beta = B->ptr_data<float>();
+            beta = B->data_ptr<float>();
         }
     }
 
@@ -37,15 +37,15 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
         if (Y->device() == DeviceType::CUDA) Y->toCPU();
         const float* gammaPtr = nullptr;
         const float* betaPtr  = nullptr;
-        if (ins.size() >= 2) { auto G = getTensor(ins[1]); if (G && G->device()==DeviceType::CUDA) G->toCPU(); gammaPtr = ins.size()>=2 ? getTensor(ins[1])->ptr_data<float>() : nullptr; }
-        if (ins.size() >= 3) { auto B = getTensor(ins[2]); if (B && B->device()==DeviceType::CUDA) B->toCPU(); betaPtr  = ins.size()>=3 ? getTensor(ins[2])->ptr_data<float>() : nullptr; }
+        if (ins.size() >= 2) { auto G = getTensor(ins[1]); if (G && G->device()==DeviceType::CUDA) G->toCPU(); gammaPtr = ins.size()>=2 ? getTensor(ins[1])->data_ptr<float>() : nullptr; }
+        if (ins.size() >= 3) { auto B = getTensor(ins[2]); if (B && B->device()==DeviceType::CUDA) B->toCPU(); betaPtr  = ins.size()>=3 ? getTensor(ins[2])->data_ptr<float>() : nullptr; }
 
         if (num_cpu_threads_ > 1) {
             kernels::simplifiedLayerNormCPUMultiThreaded(
-                X->ptr_data<float>(), gammaPtr, betaPtr, Y->ptr_data<float>(), (int)M, (int)N, epsilon, num_cpu_threads_);
+                X->data_ptr<float>(), gammaPtr, betaPtr, Y->data_ptr<float>(), (int)M, (int)N, epsilon, num_cpu_threads_);
         } else {
             kernels::simplifiedLayerNormCPU(
-                X->ptr_data<float>(), gammaPtr, betaPtr, Y->ptr_data<float>(), (int)M, (int)N, epsilon);
+                X->data_ptr<float>(), gammaPtr, betaPtr, Y->data_ptr<float>(), (int)M, (int)N, epsilon);
         }
     } else {
         // Ensure device pointers
@@ -54,11 +54,11 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
 
         const float* gammaDev = nullptr;
         const float* betaDev  = nullptr;
-        if (ins.size() >= 2) { auto G = getTensor(ins[1]); if (G && G->device()==DeviceType::CPU) G->toGPU(); gammaDev = ins.size()>=2 ? getTensor(ins[1])->ptr_data<float>() : nullptr; }
-        if (ins.size() >= 3) { auto B = getTensor(ins[2]); if (B && B->device()==DeviceType::CPU) B->toGPU(); betaDev  = ins.size()>=3 ? getTensor(ins[2])->ptr_data<float>() : nullptr; }
+        if (ins.size() >= 2) { auto G = getTensor(ins[1]); if (G && G->device()==DeviceType::CPU) G->toGPU(); gammaDev = ins.size()>=2 ? getTensor(ins[1])->data_ptr<float>() : nullptr; }
+        if (ins.size() >= 3) { auto B = getTensor(ins[2]); if (B && B->device()==DeviceType::CPU) B->toGPU(); betaDev  = ins.size()>=3 ? getTensor(ins[2])->data_ptr<float>() : nullptr; }
 
         kernels::launchSimplifiedLayerNorm(
-            X->ptr_data<float>(), gammaDev, betaDev, Y->ptr_data<float>(), (int)M, (int)N, epsilon, /*stream*/0);
+            X->data_ptr<float>(), gammaDev, betaDev, Y->data_ptr<float>(), (int)M, (int)N, epsilon, /*stream*/0);
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 

@@ -4,7 +4,7 @@ void GpuExecutor::executeNeg(const Node& node) {
     }
 
     auto input = getTensor(node.inputs()[0]);
-    auto output = std::make_shared<Tensor>(input->shape(), input->dtype());
+    std::shared_ptr<TensorBase> output = std::make_shared<CpuTensor>(input->shape(), input->dtype());
     bool move_to_gpu = !use_cpu_fallback_;
 
     switch (input->dtype()) {

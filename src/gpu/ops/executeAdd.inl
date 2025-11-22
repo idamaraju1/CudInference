@@ -18,17 +18,17 @@ void GpuExecutor::executeAdd(const Node& node) {
             if (B->device() == DeviceType::CUDA) {
                 B->toCPU();
             }
-            float scalar = B->ptr_data<float>()[0];
+            float scalar = B->data_ptr<float>()[0];
 
             if (use_cpu_fallback_) {
                 for (int i = 0; i < size; ++i) {
-                    C->ptr_data<float>()[i] = A->ptr_data<float>()[i] + scalar;
+                    C->data_ptr<float>()[i] = A->data_ptr<float>()[i] + scalar;
                 }
             } else {
                 if (B->device() == DeviceType::CPU) {
                     B->toGPU();
                 }
-                kernels::launchAddScalar(A->ptr_data<float>(), scalar, C->ptr_data<float>(), size);
+                kernels::launchAddScalar(A->data_ptr<float>(), scalar, C->data_ptr<float>(), size);
                 CUDA_CHECK(cudaDeviceSynchronize());
             }
 
@@ -47,12 +47,12 @@ void GpuExecutor::executeAdd(const Node& node) {
     // Execute
     if (use_cpu_fallback_) {
         if (num_cpu_threads_ > 1) {
-            kernels::addCPUMultiThreaded(A->ptr_data<float>(), B->ptr_data<float>(), C->ptr_data<float>(), size, num_cpu_threads_);
+            kernels::addCPUMultiThreaded(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size, num_cpu_threads_);
         } else {
-            kernels::addCPU(A->ptr_data<float>(), B->ptr_data<float>(), C->ptr_data<float>(), size);
+            kernels::addCPU(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size);
         }
     } else {
-        kernels::launchAdd(A->ptr_data<float>(), B->ptr_data<float>(), C->ptr_data<float>(), size);
+        kernels::launchAdd(A->data_ptr<float>(), B->data_ptr<float>(), C->data_ptr<float>(), size);
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 

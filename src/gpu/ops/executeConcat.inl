@@ -62,7 +62,7 @@ void GpuExecutor::executeConcat(const Node& node) {
     int64_t total_axis = output_shape[axis];
 
     if (outer == 0 || inner == 0 || total_axis == 0) {
-        auto output = std::make_shared<Tensor>(output_shape, dtype);
+        auto output = std::make_shared<CpuTensor>(output_shape, dtype);
         if (!use_cpu_fallback_) {
             output->toGPU();
         }
@@ -72,8 +72,8 @@ void GpuExecutor::executeConcat(const Node& node) {
 
     auto concatTyped = [&](auto dummy) {
         using T = decltype(dummy);
-        auto output = std::make_shared<Tensor>(output_shape, dtype);
-        T* dst = output->ptr_data<T>();
+        auto output = std::make_shared<CpuTensor>(output_shape, dtype);
+        T* dst = output->data_ptr<T>();
 
         std::vector<std::vector<uint8_t>> caches(inputs.size());
         std::vector<std::vector<T>> convert_buffers(inputs.size());

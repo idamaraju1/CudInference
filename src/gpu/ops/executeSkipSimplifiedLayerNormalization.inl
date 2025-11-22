@@ -33,11 +33,11 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
     const float* skip_data = getHostData<float>(skip, skip_cache);
     const float* gamma_data = getHostData<float>(gamma, gamma_cache);
 
-    auto sum_tensor = std::make_shared<Tensor>(input->shape(), DataType::FLOAT32);
-    auto output_tensor = std::make_shared<Tensor>(input->shape(), DataType::FLOAT32);
+    auto sum_tensor = std::make_shared<CpuTensor>(input->shape(), DataType::FLOAT32);
+    auto output_tensor = std::make_shared<CpuTensor>(input->shape(), DataType::FLOAT32);
 
-    float* sum_data = sum_tensor->ptr_data<float>();
-    float* output_data = output_tensor->ptr_data<float>();
+    float* sum_data = sum_tensor->data_ptr<float>();
+    float* output_data = output_tensor->data_ptr<float>();
 
     std::vector<float> mean(rows, 0.0f);
     std::vector<float> inv_std(rows, 0.0f);
@@ -69,13 +69,13 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
         }
     }
 
-    auto mean_tensor = std::make_shared<Tensor>(
+    auto mean_tensor = std::make_shared<CpuTensor>(
         std::vector<int64_t>{static_cast<int64_t>(rows)}, DataType::FLOAT32);
-    auto invstd_tensor = std::make_shared<Tensor>(
+    auto invstd_tensor = std::make_shared<CpuTensor>(
         std::vector<int64_t>{static_cast<int64_t>(rows)}, DataType::FLOAT32);
 
-    std::memcpy(mean_tensor->ptr_data<float>(), mean.data(), rows * sizeof(float));
-    std::memcpy(invstd_tensor->ptr_data<float>(), inv_std.data(), rows * sizeof(float));
+    std::memcpy(mean_tensor->data_ptr<float>(), mean.data(), rows * sizeof(float));
+    std::memcpy(invstd_tensor->data_ptr<float>(), inv_std.data(), rows * sizeof(float));
 
     if (!use_cpu_fallback_) {
         output_tensor->toGPU();
