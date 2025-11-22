@@ -213,19 +213,37 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
             }
         }
 
-        // Reformat and append new K/V (same logic as GPU_COPY mode lines 359-372)
+        // Reformat new K/V using GPU kernel, then copy to storage
+        auto formatted_K = Tensor::createOnGPU(
+            {static_cast<int64_t>(batch), static_cast<int64_t>(kv_heads),
+             static_cast<int64_t>(kv_seq), static_cast<int64_t>(head_dim)},
+            DataType::FLOAT32);
+        auto formatted_V = Tensor::createOnGPU(
+            {static_cast<int64_t>(batch), static_cast<int64_t>(kv_heads),
+             static_cast<int64_t>(kv_seq), static_cast<int64_t>(value_head_dim)},
+            DataType::FLOAT32);
+
+        launchReformatKV(d_K, formatted_K->mutableDeviceData<float>(),
+                         batch, kv_seq, kv_heads, head_dim);
+        launchReformatKV(d_V, formatted_V->mutableDeviceData<float>(),
+                         batch, kv_seq, kv_heads, value_head_dim);
+
+        // Copy formatted K/V to storage after past cache (strided copy per head)
+        const float* src_formatted_k = formatted_K->deviceData<float>();
+        const float* src_formatted_v = formatted_V->deviceData<float>();
+
         for (size_t b = 0; b < batch; ++b) {
-            for (size_t seq = 0; seq < kv_seq; ++seq) {
-                for (size_t h = 0; h < kv_heads; ++h) {
-                    const float* src_k = d_K + ((b * kv_seq + seq) * k_hidden) + h * head_dim;
-                    const float* src_v = d_V + ((b * kv_seq + seq) * v_hidden) + h * value_head_dim;
-                    float* dst_k = d_key_storage +
-                                   (((b * kv_heads + h) * total_seq) + (past_len + seq)) * head_dim;
-                    float* dst_v = d_value_storage +
-                                   (((b * kv_heads + h) * total_seq) + (past_len + seq)) * value_head_dim;
-                    CUDA_CHECK(cudaMemcpy(dst_k, src_k, head_dim * sizeof(float), cudaMemcpyDeviceToDevice));
-                    CUDA_CHECK(cudaMemcpy(dst_v, src_v, value_head_dim * sizeof(float), cudaMemcpyDeviceToDevice));
-                }
+            for (size_t h = 0; h < kv_heads; ++h) {
+                // Source: formatted [batch, kv_heads, kv_seq, head_dim]
+                const float* src_k = src_formatted_k + ((b * kv_heads + h) * kv_seq * head_dim);
+                const float* src_v = src_formatted_v + ((b * kv_heads + h) * kv_seq * value_head_dim);
+
+                // Destination: storage at position past_len within [batch, kv_heads, total_seq, head_dim]
+                float* dst_k = d_key_storage + ((b * kv_heads + h) * total_seq + past_len) * head_dim;
+                float* dst_v = d_value_storage + ((b * kv_heads + h) * total_seq + past_len) * value_head_dim;
+
+                CUDA_CHECK(cudaMemcpy(dst_k, src_k, kv_seq * head_dim * sizeof(float), cudaMemcpyDeviceToDevice));
+                CUDA_CHECK(cudaMemcpy(dst_v, src_v, kv_seq * value_head_dim * sizeof(float), cudaMemcpyDeviceToDevice));
             }
         }
 
