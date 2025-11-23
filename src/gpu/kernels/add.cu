@@ -8,16 +8,21 @@ namespace kernels {
 
 // Element-wise addition: C = A + B
 // Supports broadcasting for simple cases
-__global__ void add_kernel(const float* A, const float* B, float* C, int size) {
+__global__ void add_kernel(const float* __restrict__ A,
+                           const float* __restrict__ B,
+                           float* __restrict__ C,
+                           int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
     if (idx < size) {
         C[idx] = A[idx] + B[idx];
     }
 }
 
 // Vectorized addition using float4
-__global__ void add_vectorized_kernel(const float* A, const float* B, float* C, int size) {
+__global__ void add_vectorized_kernel(const float* __restrict__ A,
+                                      const float* __restrict__ B,
+                                      float* __restrict__ C,
+                                      int size) {
     int idx = (blockIdx.x * blockDim.x + threadIdx.x) * 4;
 
     if (idx + 3 < size) {
@@ -30,7 +35,6 @@ __global__ void add_vectorized_kernel(const float* A, const float* B, float* C, 
         c.w = a.w + b.w;
         *reinterpret_cast<float4*>(&C[idx]) = c;
     } else if (idx < size) {
-        // Handle remaining elements
         for (int i = idx; i < size; ++i) {
             C[i] = A[i] + B[i];
         }
@@ -38,15 +42,19 @@ __global__ void add_vectorized_kernel(const float* A, const float* B, float* C, 
 }
 
 // Add with scalar broadcasting: C = A + scalar
-__global__ void add_scalar_kernel(const float* A, float scalar, float* C, int size) {
+__global__ void add_scalar_kernel(const float* __restrict__ A,
+                                  float scalar,
+                                  float* __restrict__ C,
+                                  int size) {
     int idx = blockIdx.x * blockDim.x + threadIdx.x;
-
     if (idx < size) {
         C[idx] = A[idx] + scalar;
     }
 }
 
 void launchAdd(const float* A, const float* B, float* C, int size, cudaStream_t stream) {
+    // exit early
+    if (size <= 0) return;
     // Choose kernel based on size and alignment
     if (size >= 1024 && (reinterpret_cast<uintptr_t>(A) % 16 == 0) &&
         (reinterpret_cast<uintptr_t>(B) % 16 == 0) &&

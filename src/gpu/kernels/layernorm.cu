@@ -2,6 +2,8 @@
 #include <cuda_runtime.h>
 #include <stdexcept>
 #include <cmath>
+#include <string>
+#include <algorithm> 
 
 #ifndef CUDA_CHECK
 #define CUDA_CHECK(expr) do {                                     \
@@ -93,6 +95,53 @@ __global__ void layernorm_apply_kernel(const float* __restrict__ X,
     }
 }
 
+template <int BLOCK_SIZE, bool HasGamma, bool HasBeta>
+__global__ void layernorm_fused_kernel(const float* __restrict__ X,
+                                       const float* __restrict__ gamma,
+                                       const float* __restrict__ beta,
+                                       float* __restrict__ Y,
+                                       int N,
+                                       float eps) {
+    int row = blockIdx.x;
+    const float* x = X + row * N;
+    float*       y = Y + row * N;
+
+    // compute per-row mean/var
+    float sum   = 0.f;
+    float sumsq = 0.f;
+    for (int i = threadIdx.x; i < N; i += BLOCK_SIZE) {
+        float v = x[i];
+        sum   += v;
+        sumsq += v * v;
+    }
+
+    sum   = blockReduceSum<BLOCK_SIZE>(sum);
+    sumsq = blockReduceSum<BLOCK_SIZE>(sumsq);
+
+    __shared__ float s_mean;
+    __shared__ float s_invstd;
+
+    if (threadIdx.x == 0) {
+        float m   = sum   / static_cast<float>(N);
+        float ex2 = sumsq / static_cast<float>(N);
+        float var = fmaxf(ex2 - m * m, 0.f);
+        s_mean   = m;
+        s_invstd = rsqrtf(var + eps);
+    }
+    __syncthreads();
+
+    float mean   = s_mean;
+    float invstd = s_invstd;
+
+    // apply normalization, gamma, beta
+    for (int i = threadIdx.x; i < N; i += BLOCK_SIZE) {
+        float v = (x[i] - mean) * invstd;
+        if constexpr (HasGamma) v *= gamma[i];
+        if constexpr (HasBeta)  v += beta[i];
+        y[i] = v;
+    }
+}
+
 // ---- public launcher (matches header) ----
 void launchSimplifiedLayerNorm(const float* X,
                                const float* gamma,
@@ -106,37 +155,30 @@ void launchSimplifiedLayerNorm(const float* X,
     }
 
     constexpr int BLOCK = 256;
+    dim3 grid(M);
+    dim3 block(BLOCK);
 
-    float* d_mean = nullptr;
-    float* d_inv  = nullptr;
-    CUDA_CHECK(cudaMallocAsync(&d_mean, sizeof(float) * M, stream));
-    CUDA_CHECK(cudaMallocAsync(&d_inv,  sizeof(float) * M, stream));
-
-    // 1) stats
-    layernorm_stats_kernel<BLOCK><<<M, BLOCK, 0, stream>>>(X, d_mean, d_inv, N, epsilon);
-
-    // 2) apply
+    //apply
     if (gamma && beta) {
-        layernorm_apply_kernel<BLOCK, true, true><<<M, BLOCK, 0, stream>>>(X, gamma, beta, d_mean, d_inv, Y, N);
+        layernorm_fused_kernel<BLOCK, true, true>
+            <<<grid, block, 0, stream>>>(X, gamma, beta, Y, N, epsilon);
     } else if (gamma) {
-        layernorm_apply_kernel<BLOCK, true, false><<<M, BLOCK, 0, stream>>>(X, gamma, nullptr, d_mean, d_inv, Y, N);
+        layernorm_fused_kernel<BLOCK, true, false>
+            <<<grid, block, 0, stream>>>(X, gamma, nullptr, Y, N, epsilon);
     } else if (beta) {
-        layernorm_apply_kernel<BLOCK, false, true><<<M, BLOCK, 0, stream>>>(X, nullptr, beta, d_mean, d_inv, Y, N);
+        layernorm_fused_kernel<BLOCK, false, true>
+            <<<grid, block, 0, stream>>>(X, nullptr, beta, Y, N, epsilon);
     } else {
-        layernorm_apply_kernel<BLOCK, false, false><<<M, BLOCK, 0, stream>>>(X, nullptr, nullptr, d_mean, d_inv, Y, N);
+        layernorm_fused_kernel<BLOCK, false, false>
+            <<<grid, block, 0, stream>>>(X, nullptr, nullptr, Y, N, epsilon);
     }
 
     // catch kernel errors
     cudaError_t err = cudaGetLastError();
     if (err != cudaSuccess) {
-        cudaFreeAsync(d_mean, stream);
-        cudaFreeAsync(d_inv,  stream);
         throw std::runtime_error(std::string("LayerNorm kernel launch failed: ")
                                  + cudaGetErrorString(err));
     }
-
-    CUDA_CHECK(cudaFreeAsync(d_mean, stream));
-    CUDA_CHECK(cudaFreeAsync(d_inv,  stream));
 }
 
 // ---- CPU fallbacks (match header names exactly) ----

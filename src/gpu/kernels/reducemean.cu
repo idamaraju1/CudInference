@@ -108,6 +108,45 @@ void reduceMeanCPU(
     }
 }
 
+/**
+ * For standard row major tensors, you can optimize by only reducing over
+ * the last dimension.
+ */
+__global__ void reduceMeanLastDimKernel(const float* __restrict__ input,
+                                        float* __restrict__ output,
+                                        int64_t outer_size,
+                                        int64_t inner_size) {
+    int row = blockIdx.x;
+    if (row >= outer_size) return;
+
+    int tid = threadIdx.x;
+    float sum = 0.0f;
+
+    // Each thread traverses part of the row
+    for (int64_t col = tid; col < inner_size; col += blockDim.x) {
+        sum += input[row * inner_size + col];
+    }
+
+    // Block-wide reduction
+    __shared__ float sdata[256];  // assumes blockDim.x <= 256
+    sdata[tid] = sum;
+    __syncthreads();
+
+    // Reduce in shared memory
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            sdata[tid] += sdata[tid + stride];
+        }
+        __syncthreads();
+    }
+
+    // Write mean
+    if (tid == 0) {
+        output[row] = sdata[0] / static_cast<float>(inner_size);
+    }
+}
+
+
 // GPU kernel for ReduceMean
 __global__ void reduceMeanKernel(
     const float* input,
@@ -183,75 +222,96 @@ void launchReduceMeanKernel(
 ) {
     if (use_cpu) {
         reduceMeanCPU(input, output, input_shape, axes, num_threads);
-    } else {
-        // Prepare data for GPU
-        std::vector<bool> is_reduced(input_shape.size(), false);
-        for (int64_t axis : axes) {
-            is_reduced[axis] = true;
-        }
-
-        int64_t input_size = 1;
-        for (auto dim : input_shape) {
-            input_size *= dim;
-        }
-
-        std::vector<int64_t> output_shape;
-        for (size_t i = 0; i < input_shape.size(); ++i) {
-            if (!is_reduced[i]) {
-                output_shape.push_back(input_shape[i]);
-            }
-        }
-        if (output_shape.empty()) {
-            output_shape.push_back(1);
-        }
-
-        int64_t output_size = 1;
-        for (auto dim : output_shape) {
-            output_size *= dim;
-        }
-
-        int64_t reduce_count = 1;
-        for (int64_t axis : axes) {
-            reduce_count *= input_shape[axis];
-        }
-        float scale = 1.0f / reduce_count;
-
-        // Allocate and copy metadata to GPU
-        // Convert vector<bool> to vector<char> since vector<bool> is specialized
-        std::vector<char> is_reduced_char(is_reduced.begin(), is_reduced.end());
-
-        int64_t* input_shape_gpu;
-        int64_t* output_shape_gpu;
-        bool* is_reduced_gpu;
-
-        cudaMalloc(&input_shape_gpu, input_shape.size() * sizeof(int64_t));
-        cudaMalloc(&output_shape_gpu, output_shape.size() * sizeof(int64_t));
-        cudaMalloc(&is_reduced_gpu, is_reduced.size() * sizeof(bool));
-
-        cudaMemcpy(input_shape_gpu, input_shape.data(), input_shape.size() * sizeof(int64_t), cudaMemcpyHostToDevice);
-        cudaMemcpy(output_shape_gpu, output_shape.data(), output_shape.size() * sizeof(int64_t), cudaMemcpyHostToDevice);
-        cudaMemcpy(is_reduced_gpu, is_reduced_char.data(), is_reduced_char.size() * sizeof(char), cudaMemcpyHostToDevice);
-
-        // Initialize output to zero
-        cudaMemset(output, 0, output_size * sizeof(float));
-
-        // Launch kernel
-        int block_size = 256;
-        int grid_size = (input_size + block_size - 1) / block_size;
-
-        reduceMeanKernel<<<grid_size, block_size>>>(
-            input, output,
-            input_shape_gpu, output_shape_gpu, is_reduced_gpu,
-            input_size, output_size, input_shape.size(), scale
-        );
-
-        cudaDeviceSynchronize();
-
-        // Cleanup
-        cudaFree(input_shape_gpu);
-        cudaFree(output_shape_gpu);
-        cudaFree(is_reduced_gpu);
+        return;
     }
-}
 
+    // Fast path: reduce over last dimension only (typical for LayerNorm)
+    const int ndim = static_cast<int>(input_shape.size());
+    if (axes.size() == 1 && axes[0] == ndim - 1) {
+        int64_t inner = input_shape.back();  // size of last dimension
+        int64_t outer = 1;
+        for (int i = 0; i < ndim - 1; ++i) outer *= input_shape[i];
+
+        if (outer == 0 || inner == 0) return;
+
+        int block = 256;  // must match shared memory size in kernel
+        int grid  = static_cast<int>(outer);
+
+        reduceMeanLastDimKernel<<<grid, block>>>(input, output, outer, inner);
+
+        cudaError_t err = cudaGetLastError();
+        if (err != cudaSuccess) {
+            throw std::runtime_error(std::string("ReduceMeanLastDim kernel failed: ") +
+                                     cudaGetErrorString(err));
+        }
+        return;
+    }
+    // Prepare data for GPU
+    std::vector<bool> is_reduced(input_shape.size(), false);
+    for (int64_t axis : axes) {
+        is_reduced[axis] = true;
+    }
+
+    int64_t input_size = 1;
+    for (auto dim : input_shape) {
+        input_size *= dim;
+    }
+
+    std::vector<int64_t> output_shape;
+    for (size_t i = 0; i < input_shape.size(); ++i) {
+        if (!is_reduced[i]) {
+            output_shape.push_back(input_shape[i]);
+        }
+    }
+    if (output_shape.empty()) {
+        output_shape.push_back(1);
+    }
+
+    int64_t output_size = 1;
+    for (auto dim : output_shape) {
+        output_size *= dim;
+    }
+
+    int64_t reduce_count = 1;
+    for (int64_t axis : axes) {
+        reduce_count *= input_shape[axis];
+    }
+    float scale = 1.0f / reduce_count;
+
+    // Allocate and copy metadata to GPU
+    // Convert vector<bool> to vector<char> since vector<bool> is specialized
+    std::vector<char> is_reduced_char(is_reduced.begin(), is_reduced.end());
+
+    int64_t* input_shape_gpu;
+    int64_t* output_shape_gpu;
+    bool* is_reduced_gpu;
+
+    cudaMalloc(&input_shape_gpu, input_shape.size() * sizeof(int64_t));
+    cudaMalloc(&output_shape_gpu, output_shape.size() * sizeof(int64_t));
+    cudaMalloc(&is_reduced_gpu, is_reduced.size() * sizeof(bool));
+
+    cudaMemcpy(input_shape_gpu, input_shape.data(), input_shape.size() * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(output_shape_gpu, output_shape.data(), output_shape.size() * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(is_reduced_gpu, is_reduced_char.data(), is_reduced_char.size() * sizeof(char), cudaMemcpyHostToDevice);
+
+    // Initialize output to zero
+    cudaMemset(output, 0, output_size * sizeof(float));
+
+    // Launch kernel
+    int block_size = 256;
+    int grid_size = (input_size + block_size - 1) / block_size;
+
+    reduceMeanKernel<<<grid_size, block_size>>>(
+        input, output,
+        input_shape_gpu, output_shape_gpu, is_reduced_gpu,
+        input_size, output_size, input_shape.size(), scale
+    );
+
+    cudaDeviceSynchronize();
+
+    // Cleanup
+    cudaFree(input_shape_gpu);
+    cudaFree(output_shape_gpu);
+    cudaFree(is_reduced_gpu);
+    }
 } // namespace onnx_runner

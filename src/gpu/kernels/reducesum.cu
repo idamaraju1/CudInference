@@ -3,6 +3,8 @@
 #include <omp.h>
 #include <cstring>
 #include <algorithm>
+#include <stdexcept> 
+#include <string>   
 
 namespace onnx_runner {
 
@@ -51,6 +53,42 @@ __global__ void reduceSumKernel(
         atomicAdd(&output[out_idx], input[idx]);
     }
 }
+
+/**
+ * Faster path for reduce sum last dimension (see reducemean.cu) 
+ */
+__global__ void reduceSumLastDimKernel(const float* __restrict__ input,
+                                       float* __restrict__ output,
+                                       int64_t outer_size,
+                                       int64_t inner_size) {
+    int row = blockIdx.x;
+    if (row >= outer_size) return;
+
+    int tid = threadIdx.x;
+    float sum = 0.0f;
+
+    // Each thread walks part of the row
+    for (int64_t col = tid; col < inner_size; col += blockDim.x) {
+        sum += input[row * inner_size + col];
+    }
+
+    __shared__ float sdata[256];  // assume blockDim.x <= 256
+    sdata[tid] = sum;
+    __syncthreads();
+
+    // Block-wide reduction
+    for (int stride = blockDim.x / 2; stride > 0; stride >>= 1) {
+        if (tid < stride) {
+            sdata[tid] += sdata[tid + stride];
+        }
+        __syncthreads();
+    }
+
+    if (tid == 0) {
+        output[row] = sdata[0];
+    }
+}
+
 
 // Optimized single-axis reduction using warp shuffles
 __global__ void reduceSumSingleAxisKernel(
@@ -157,74 +195,99 @@ void launchReduceSum(
     if (use_cpu) {
         reduceSumCPU(input, output, input_strides, output_strides, reduce_mask,
                      ndim, total_input, output_size, keepdims, num_threads);
-    } else {
-        // Initialize output to zero
-        cudaMemset(output, 0, output_size * sizeof(float));
+        return;
+    }
+    // Initialize output to zero
+    cudaMemset(output, 0, output_size * sizeof(float));
 
-        // Check if this is a single-axis reduction (more common and efficient)
-        int num_reduce_axes = 0;
-        int64_t reduce_axis = -1;
-        for (int64_t i = 0; i < ndim; ++i) {
-            if (reduce_mask[i]) {
-                num_reduce_axes++;
-                reduce_axis = i;
-            }
+    // Check if this is a single-axis reduction (more common and efficient)
+    int num_reduce_axes = 0;
+    int64_t reduce_axis = -1;
+    for (int64_t i = 0; i < ndim; ++i) {
+        if (reduce_mask[i]) {
+            num_reduce_axes++;
+            reduce_axis = i;
+        }
+    }
+
+    // fast path.
+    if (num_reduce_axes == 1 && reduce_axis == ndim - 1) {
+        int64_t inner = input_shape.back();  // last dim
+        int64_t outer = 1;
+        for (int64_t i = 0; i < ndim - 1; ++i) {
+            outer *= input_shape[i];
         }
 
-        if (num_reduce_axes == 1 && reduce_axis >= 0) {
-            // Optimized path for single-axis reduction
-            int64_t outer_size = 1;
-            for (int64_t i = 0; i < reduce_axis; ++i) {
-                outer_size *= input_shape[i];
+        if (outer > 0 && inner > 0) {
+            int block = 256;                 // must match sdata size in kernel
+            int grid  = static_cast<int>(outer);
+
+            reduceSumLastDimKernel<<<grid, block>>>(input, output, outer, inner);
+
+            cudaError_t err = cudaGetLastError();
+            if (err != cudaSuccess) {
+                throw std::runtime_error(std::string("ReduceSumLastDim kernel failed: ") +
+                                         cudaGetErrorString(err));
             }
-            int64_t reduce_dim = input_shape[reduce_axis];
-            int64_t inner_size = 1;
-            for (int64_t i = reduce_axis + 1; i < ndim; ++i) {
-                inner_size *= input_shape[i];
-            }
-
-            int block_size = 256;
-            dim3 grid_size((inner_size + block_size - 1) / block_size, outer_size);
-            reduceSumSingleAxisKernel<<<grid_size, block_size>>>(
-                input, output, outer_size, reduce_dim, inner_size
-            );
-        } else {
-            // General path using atomic adds
-            int64_t* d_input_strides;
-            int64_t* d_output_strides;
-            bool* d_reduce_mask;
-
-            cudaMalloc(&d_input_strides, ndim * sizeof(int64_t));
-            cudaMalloc(&d_output_strides, output_strides.size() * sizeof(int64_t));
-            cudaMalloc(&d_reduce_mask, ndim * sizeof(bool));
-
-            cudaMemcpy(d_input_strides, input_strides.data(), ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
-            cudaMemcpy(d_output_strides, output_strides.data(), output_strides.size() * sizeof(int64_t), cudaMemcpyHostToDevice);
-
-            // Convert vector<bool> to regular bool array for GPU transfer
-            std::vector<bool> reduce_mask_copy(reduce_mask.begin(), reduce_mask.end());
-            bool* temp_mask = new bool[ndim];
-            for (int64_t i = 0; i < ndim; ++i) {
-                temp_mask[i] = reduce_mask[i];
-            }
-            cudaMemcpy(d_reduce_mask, temp_mask, ndim * sizeof(bool), cudaMemcpyHostToDevice);
-            delete[] temp_mask;
-
-            int block_size = 256;
-            int grid_size = (total_input + block_size - 1) / block_size;
-
-            reduceSumKernel<<<grid_size, block_size>>>(
-                input, output, d_input_strides, d_output_strides, d_reduce_mask,
-                ndim, total_input, output_size, keepdims
-            );
-
-            cudaFree(d_input_strides);
-            cudaFree(d_output_strides);
-            cudaFree(d_reduce_mask);
         }
 
         cudaDeviceSynchronize();
+        return;
     }
+
+    if (num_reduce_axes == 1 && reduce_axis >= 0) {
+        // Optimized path for single-axis reduction
+        int64_t outer_size = 1;
+        for (int64_t i = 0; i < reduce_axis; ++i) {
+            outer_size *= input_shape[i];
+        }
+        int64_t reduce_dim = input_shape[reduce_axis];
+        int64_t inner_size = 1;
+        for (int64_t i = reduce_axis + 1; i < ndim; ++i) {
+            inner_size *= input_shape[i];
+        }
+
+        int block_size = 256;
+        dim3 grid_size((inner_size + block_size - 1) / block_size, outer_size);
+        reduceSumSingleAxisKernel<<<grid_size, block_size>>>(
+            input, output, outer_size, reduce_dim, inner_size
+        );
+        return;
+    } 
+    // General path using atomic adds
+    int64_t* d_input_strides;
+    int64_t* d_output_strides;
+    bool* d_reduce_mask;
+
+    cudaMalloc(&d_input_strides, ndim * sizeof(int64_t));
+    cudaMalloc(&d_output_strides, output_strides.size() * sizeof(int64_t));
+    cudaMalloc(&d_reduce_mask, ndim * sizeof(bool));
+
+    cudaMemcpy(d_input_strides, input_strides.data(), ndim * sizeof(int64_t), cudaMemcpyHostToDevice);
+    cudaMemcpy(d_output_strides, output_strides.data(), output_strides.size() * sizeof(int64_t), cudaMemcpyHostToDevice);
+
+    // Convert vector<bool> to regular bool array for GPU transfer
+    std::vector<bool> reduce_mask_copy(reduce_mask.begin(), reduce_mask.end());
+    bool* temp_mask = new bool[ndim];
+    for (int64_t i = 0; i < ndim; ++i) {
+        temp_mask[i] = reduce_mask[i];
+    }
+    cudaMemcpy(d_reduce_mask, temp_mask, ndim * sizeof(bool), cudaMemcpyHostToDevice);
+    delete[] temp_mask;
+
+    int block_size = 256;
+    int grid_size = (total_input + block_size - 1) / block_size;
+
+    reduceSumKernel<<<grid_size, block_size>>>(
+        input, output, d_input_strides, d_output_strides, d_reduce_mask,
+        ndim, total_input, output_size, keepdims
+    );
+
+    cudaFree(d_input_strides);
+    cudaFree(d_output_strides);
+    cudaFree(d_reduce_mask);
+
+    cudaDeviceSynchronize();
 }
 
 } // namespace onnx_runner

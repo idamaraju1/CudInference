@@ -5,6 +5,19 @@
 
 namespace onnx_runner {
 namespace kernels {
+namespace {
+    thread_local cublasHandle_t g_cublas_handle = nullptr;
+
+    cublasHandle_t get_cublas_handle() {
+        if (!g_cublas_handle) {
+            cublasStatus_t st = cublasCreate(&g_cublas_handle);
+            if (st != CUBLAS_STATUS_SUCCESS) {
+                throw std::runtime_error("cublasCreate failed");
+            }
+        }
+        return g_cublas_handle;
+    }
+}
 
 // Simple matrix multiplication kernel (for small matrices or as fallback)
 // C = A @ B where A is (M, K) and B is (K, N), C is (M, N)
@@ -74,48 +87,44 @@ __global__ void matmul_tiled_kernel(const float* A, const float* B, float* C,
 
 void launchMatMul(const float* A, const float* B, float* C,
                   int M, int K, int N, cudaStream_t stream) {
-    // For larger matrices, use cuBLAS for optimal performance
-    // For smaller matrices, use our custom kernel
-
     const int TILE_SIZE = 16;
     const int USE_CUBLAS_THRESHOLD = 128;
 
     if (M >= USE_CUBLAS_THRESHOLD || N >= USE_CUBLAS_THRESHOLD || K >= USE_CUBLAS_THRESHOLD) {
-        // Use cuBLAS for large matrices
-        cublasHandle_t handle;
-        cublasCreate(&handle);
+        cublasHandle_t handle = get_cublas_handle();
         cublasSetStream(handle, stream);
 
         const float alpha = 1.0f;
-        const float beta = 0.0f;
+        const float beta  = 0.0f;
 
-        // cuBLAS uses column-major, so we compute: C^T = B^T @ A^T
-        // Which gives us C = A @ B in row-major
-        cublasSgemm(handle,
-                    CUBLAS_OP_N, CUBLAS_OP_N,
-                    N, M, K,
-                    &alpha,
-                    B, N,
-                    A, K,
-                    &beta,
-                    C, N);
-
-        cublasDestroy(handle);
+        cublasStatus_t st = cublasSgemm(
+            handle,
+            CUBLAS_OP_N, CUBLAS_OP_N,
+            N, M, K,          // m, n, k in column-major
+            &alpha,
+            B, N,             // B: (N x K) as B^T
+            A, K,             // A: (K x M) as A^T
+            &beta,
+            C, N              // C: (N x M) as C^T
+        );
+        if (st != CUBLAS_STATUS_SUCCESS) {
+            throw std::runtime_error("cublasSgemm failed");
+        }
     } else {
-        // Use custom tiled kernel for smaller matrices
         dim3 blockDim(TILE_SIZE, TILE_SIZE);
         dim3 gridDim((N + TILE_SIZE - 1) / TILE_SIZE,
                      (M + TILE_SIZE - 1) / TILE_SIZE);
 
         matmul_tiled_kernel<16><<<gridDim, blockDim, 0, stream>>>(A, B, C, M, K, N);
-    }
 
-    cudaError_t error = cudaGetLastError();
-    if (error != cudaSuccess) {
-        throw std::runtime_error(std::string("MatMul kernel launch failed: ") +
-                               cudaGetErrorString(error));
+        cudaError_t error = cudaGetLastError();
+        if (error != cudaSuccess) {
+            throw std::runtime_error(std::string("MatMul kernel launch failed: ") +
+                                     cudaGetErrorString(error));
+        }
     }
 }
+
 
 // CPU fallback for debugging
 void matmulCPU(const float* A, const float* B, float* C, int M, int K, int N) {
