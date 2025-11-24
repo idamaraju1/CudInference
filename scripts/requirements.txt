@@ -1,10 +1,6 @@
-# Core dependencies for ONNX model creation and export
 torch>=2.0.0
-onnx>=1.14.0
+onnx>=1.19.0
 numpy>=1.21.0
-
-# For validation against reference implementation
-onnxruntime>=1.15.0
-
-# For benchmark visualization
+onnxruntime>=1.23.0
 matplotlib>=3.5.0
+tokenizers>=0.22.1
