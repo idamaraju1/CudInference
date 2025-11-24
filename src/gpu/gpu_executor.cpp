@@ -1,6 +1,7 @@
 #include "gpu_executor.hpp"
 #include "kernels/kernels.cuh"
 #include "../utils/logger.hpp"
+#include <cuda_fp16.h>
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>

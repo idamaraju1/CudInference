@@ -5,6 +5,8 @@
 #include <cstdint>
 
 namespace onnx_runner {
+
+enum class DataType;
 namespace kernels {
 
 // MatMul kernel
@@ -52,8 +54,12 @@ void launchSimplifiedLayerNorm(const float* X, const float* gamma, const float* 
 
 // CPU fallbacks (single-threaded and OpenMP)
 void simplifiedLayerNormCPU(const float* X, const float* gamma, const float* beta, float* Y, int M, int N, float epsilon);
-
 void simplifiedLayerNormCPUMultiThreaded(const float* X, const float* gamma, const float* beta, float* Y, int M, int N, float epsilon, int num_threads);
+
+// SkipSimplifiedLayerNormalization (residual + RMSNorm)
+void launchSkipSimplifiedLayerNorm(const float* X, const float* Skip, const float* gamma, const float* beta, float* Y, float* residual_out, int M, int N, float epsilon, cudaStream_t stream);
+void skipSimplifiedLayerNormCPU(const float* X, const float* Skip, const float* gamma, const float* beta, float* Y, float* residual_out, int M, int N, float epsilon);
+void skipSimplifiedLayerNormCPUMultiThreaded(const float* X, const float* Skip, const float* gamma, const float* beta, float* Y, float* residual_out, int M, int N, float epsilon, int num_threads);
 
 // Sigmoid activation
 void launchSigmoid(const float* input, float* output, int size, cudaStream_t stream = 0);
@@ -91,9 +97,10 @@ void launchRotaryEmbedding(
 
 // Gather operation (outside kernels namespace)
 void launchGatherKernel(
-    const float* data,
+    const void* data,
     const int64_t* indices,
-    float* output,
+    void* output,
+    DataType dtype,
     int64_t axis_dim_data,
     int64_t axis_dim_indices,
     int64_t outer_size,

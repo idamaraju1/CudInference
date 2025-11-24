@@ -66,6 +66,34 @@ std::string exec_command(const std::string& cmd) {
     return result;
 }
 
+// Helper function to find the tokenizer script regardless of working directory
+std::string findTokenizerScript() {
+    // Try multiple possible locations
+    std::vector<std::string> possible_paths = {
+        "scripts/hf_tokenizer.py",           // From project root
+        "../scripts/hf_tokenizer.py",        // From build/ directory
+        "./hf_tokenizer.py",                 // Same directory
+        "../../scripts/hf_tokenizer.py"      // From nested build directories
+    };
+
+    for (const auto& path : possible_paths) {
+        std::ifstream file(path);
+        if (file.good()) {
+            return path;
+        }
+    }
+
+    // If not found, throw an error with helpful message
+    throw std::runtime_error(
+        "Could not find hf_tokenizer.py script. Tried:\n"
+        "  - scripts/hf_tokenizer.py\n"
+        "  - ../scripts/hf_tokenizer.py\n"
+        "  - ./hf_tokenizer.py\n"
+        "  - ../../scripts/hf_tokenizer.py\n"
+        "Make sure you're running from the project root or build/ directory."
+    );
+}
+
 std::vector<int64_t> tokenizeText(const std::string& text, const std::string& tokenizer_path) {
     // Escape single quotes in text for shell command
     std::string escaped_text = text;
@@ -75,8 +103,9 @@ std::vector<int64_t> tokenizeText(const std::string& text, const std::string& to
         pos += 4;
     }
 
-    // Call Python tokenizer script
-    std::string cmd = "python3 scripts/hf_tokenizer.py --tokenizer '" + tokenizer_path +
+    // Find tokenizer script and call it
+    std::string script_path = findTokenizerScript();
+    std::string cmd = "python3 " + script_path + " --tokenizer '" + tokenizer_path +
                      "' --encode '" + escaped_text + "' 2>&1";
 
     std::string output = exec_command(cmd);
@@ -116,8 +145,9 @@ std::string decodeTokens(const std::vector<int64_t>& token_ids, const std::strin
     }
     std::string ids_str = ids_stream.str();
 
-    // Call Python tokenizer script
-    std::string cmd = "python3 scripts/hf_tokenizer.py --tokenizer '" + tokenizer_path +
+    // Find tokenizer script and call it
+    std::string script_path = findTokenizerScript();
+    std::string cmd = "python3 " + script_path + " --tokenizer '" + tokenizer_path +
                      "' --decode '" + ids_str + "' 2>&1";
 
     std::string output = exec_command(cmd);
@@ -137,18 +167,85 @@ std::string decodeTokens(const std::vector<int64_t>& token_ids, const std::strin
 }
 
 // Print first few values of a tensor for debugging
-void printTensorSample(const std::string& name, const Tensor& tensor, int max_values = 10) {
+void printTensorSample(const std::string& name, Tensor& tensor, int max_values = 10) {
     std::cout << name << " " << tensor.shapeStr() << ": [";
 
-    const float* data = tensor.data<float>();
-    int count = std::min(static_cast<int>(tensor.size()), max_values);
-
-    for (int i = 0; i < count; ++i) {
-        std::cout << data[i];
-        if (i < count - 1) std::cout << ", ";
+    if (tensor.device() == DeviceType::CUDA) {
+        tensor.toCPU();
     }
 
-    if (tensor.size() > static_cast<size_t>(max_values)) {
+    size_t count = std::min(static_cast<size_t>(max_values), tensor.size());
+    switch (tensor.dtype()) {
+        case DataType::FLOAT32: {
+            const float* data = tensor.data<float>();
+            for (size_t i = 0; i < count; ++i) {
+                std::cout << data[i];
+                if (i + 1 < count) std::cout << ", ";
+            }
+            break;
+        }
+        case DataType::INT32: {
+            const int32_t* data = tensor.data<int32_t>();
+            for (size_t i = 0; i < count; ++i) {
+                std::cout << data[i];
+                if (i + 1 < count) std::cout << ", ";
+            }
+            break;
+        }
+        case DataType::INT64: {
+            const int64_t* data = tensor.data<int64_t>();
+            for (size_t i = 0; i < count; ++i) {
+                std::cout << data[i];
+                if (i + 1 < count) std::cout << ", ";
+            }
+            break;
+        }
+        case DataType::UINT8: {
+            const uint8_t* data = tensor.data<uint8_t>();
+            for (size_t i = 0; i < count; ++i) {
+                std::cout << static_cast<int>(data[i]);
+                if (i + 1 < count) std::cout << ", ";
+            }
+            break;
+        }
+        case DataType::FLOAT16: {
+            const uint16_t* raw = tensor.data<uint16_t>();
+            for (size_t i = 0; i < count; ++i) {
+                // Minimal half to float conversion
+                uint16_t h = raw[i];
+                uint32_t sign = (h & 0x8000) << 16;
+                uint32_t mant = (h & 0x03FF) << 13;
+                uint32_t exp  = (h & 0x7C00) >> 10;
+                uint32_t f;
+                if (exp == 0) {
+                    if (mant == 0) {
+                        f = sign;
+                    } else {
+                        exp = 1;
+                        while ((mant & 0x400000) == 0) {
+                            mant <<= 1;
+                            --exp;
+                        }
+                        mant &= 0x3FFFFF;
+                        f = sign | ((exp + 127 - 15) << 23) | mant;
+                    }
+                } else if (exp == 31) {
+                    f = sign | 0x7F800000 | mant;
+                } else {
+                    f = sign | ((exp + 127 - 15) << 23) | mant;
+                }
+                float val = *reinterpret_cast<float*>(&f);
+                std::cout << val;
+                if (i + 1 < count) std::cout << ", ";
+            }
+            break;
+        }
+        default:
+            std::cout << "Unsupported dtype for print";
+            break;
+    }
+
+    if (tensor.size() > count) {
         std::cout << ", ...";
     }
 

@@ -23,7 +23,7 @@ public:
     struct GenerationConfig {
         int max_tokens = 50;          // Maximum number of tokens to generate
         float temperature = 1.0f;     // Temperature for sampling (0.0 = greedy)
-        int eos_token_id = 2;         // End-of-sequence token ID (default: 2 for most models)
+        int eos_token_id = -1;        // End-of-sequence token ID (-1 = auto-detect from tokenizer)
         bool verbose = false;         // Print generation progress
 
         GenerationConfig() = default;
@@ -95,11 +95,22 @@ private:
                                    float temperature);
 
     /**
+     * Best-effort detection of EOS token id from tokenizer.json. Returns -1 on failure.
+     */
+    int detectEosTokenId(const std::string& tokenizer_path);
+
+    /**
      * Execute a shell command and capture output
      * @param cmd Command to execute
      * @return Command output as string
      */
     std::string execCommand(const std::string& cmd);
+
+    /**
+     * Find the tokenizer script path regardless of working directory
+     * @return Path to hf_tokenizer.py script
+     */
+    std::string findTokenizerScript();
 
     /**
      * Create input tensors for the model from token IDs

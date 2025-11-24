@@ -39,4 +39,4 @@ venv/
 # Logs
 *.log
 
-tokenizer.json
+*tokenizer.json

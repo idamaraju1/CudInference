@@ -10,6 +10,7 @@ void GpuExecutor::executeGather(const Node& node) {
 
     auto data = getTensor(node.inputs()[0]);
     auto indices_tensor = getTensor(node.inputs()[1]);
+    DataType dtype = data->dtype();
 
     // Get axis attribute (default 0)
     int64_t axis = node.getIntAttr("axis", 0);
@@ -73,8 +74,8 @@ void GpuExecutor::executeGather(const Node& node) {
         output_shape.push_back(data->dim(i));
     }
 
-    // Allocate output
-    auto output = allocateOutput(output_shape);
+    // Allocate output (preserve input dtype)
+    auto output = allocateOutput(output_shape, dtype);
 
     // Compute dimensions for the gather kernel
     int64_t outer_size = 1;
@@ -83,6 +84,19 @@ void GpuExecutor::executeGather(const Node& node) {
     }
 
     int64_t axis_dim_data = data->dim(axis);
+
+    if (axis_dim_data == 0 && !host_indices.empty()) {
+        throw std::runtime_error("Gather axis has zero length but indices are non-empty");
+    }
+
+    for (auto& idx : host_indices) {
+        if (idx < -axis_dim_data || idx >= axis_dim_data) {
+            throw std::runtime_error("Gather index out of range");
+        }
+        if (idx < 0) {
+            idx += axis_dim_data;
+        }
+    }
 
     int64_t inner_size = 1;
     for (size_t i = axis + 1; i < data->ndim(); ++i) {
@@ -101,40 +115,46 @@ void GpuExecutor::executeGather(const Node& node) {
         return;
     }
 
-    if (use_cpu_fallback_) {
-        std::vector<uint8_t> data_cache;
-        const float* host_data = getHostData<float>(data, data_cache);
+    auto dispatchGather = [&](auto* type_tag) {
+        using T = typename std::remove_pointer<decltype(type_tag)>::type;
 
-        launchGatherKernel(
-            host_data,
-            host_indices.data(),
-            output->data<float>(),
-            axis_dim_data,
-            axis_dim_indices,
-            outer_size,
-            inner_size,
-            true,
-            num_cpu_threads_
-        );
-    } else {
+        if (use_cpu_fallback_) {
+            std::vector<uint8_t> data_cache;
+            const T* host_data = getHostData<T>(data, data_cache);
+
+            launchGatherKernel(
+                host_data,
+                host_indices.data(),
+                output->data<T>(),
+                dtype,
+                axis_dim_data,
+                axis_dim_indices,
+                outer_size,
+                inner_size,
+                true,
+                num_cpu_threads_
+            );
+            return;
+        }
+
         // GPU path: use device pointers directly if data is on GPU
-        const float* d_data;
+        const T* d_data;
         std::vector<uint8_t> data_cache;
         bool need_free_data = false;
 
         if (data->device() == DeviceType::CUDA) {
-            d_data = data->data<float>();
+            d_data = data->data<T>();
         } else {
-            const float* host_data = getHostData<float>(data, data_cache);
-            float* temp_data;
-            size_t data_bytes = data->size() * sizeof(float);
+            const T* host_data = getHostData<T>(data, data_cache);
+            T* temp_data;
+            size_t data_bytes = data->size() * sizeof(T);
             CUDA_CHECK(cudaMalloc(&temp_data, data_bytes));
             CUDA_CHECK(cudaMemcpy(temp_data, host_data, data_bytes, cudaMemcpyHostToDevice));
             d_data = temp_data;
             need_free_data = true;
         }
 
-        // Allocate and copy indices to GPU
+        // Allocate and copy indices to GPU (already normalized on host)
         int64_t* d_indices;
         size_t indices_bytes = host_indices.size() * sizeof(int64_t);
         CUDA_CHECK(cudaMalloc(&d_indices, indices_bytes));
@@ -143,7 +163,8 @@ void GpuExecutor::executeGather(const Node& node) {
         launchGatherKernel(
             d_data,
             d_indices,
-            output->data<float>(),
+            output->data<T>(),
+            dtype,
             axis_dim_data,
             axis_dim_indices,
             outer_size,
@@ -155,8 +176,28 @@ void GpuExecutor::executeGather(const Node& node) {
         CUDA_CHECK(cudaDeviceSynchronize());
         CUDA_CHECK(cudaFree(d_indices));
         if (need_free_data) {
-            CUDA_CHECK(cudaFree(const_cast<float*>(d_data)));
+            CUDA_CHECK(cudaFree(const_cast<T*>(d_data)));
         }
+    };
+
+    switch (dtype) {
+        case DataType::FLOAT32:
+            dispatchGather(static_cast<float*>(nullptr));
+            break;
+        case DataType::INT32:
+            dispatchGather(static_cast<int32_t*>(nullptr));
+            break;
+        case DataType::INT64:
+            dispatchGather(static_cast<int64_t*>(nullptr));
+            break;
+        case DataType::UINT8:
+            dispatchGather(static_cast<uint8_t*>(nullptr));
+            break;
+        case DataType::FLOAT16:
+            dispatchGather(static_cast<__half*>(nullptr));
+            break;
+        default:
+            throw std::runtime_error("Gather: unsupported input dtype");
     }
 
     tensors_[node.outputs()[0]] = output;

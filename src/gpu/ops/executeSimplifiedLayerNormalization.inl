@@ -27,6 +27,10 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
         throw std::runtime_error("SimplifiedLayerNormalization: invalid hidden size computed from axis");
     }
     size_t M = total / N;
+    const auto int_max = static_cast<size_t>(std::numeric_limits<int>::max());
+    if (M > int_max || N > int_max) {
+        throw std::runtime_error("SimplifiedLayerNormalization: M or N too large for kernel launch");
+    }
     float epsilon = node.getFloatAttr("epsilon", 1e-5f);
 
     std::shared_ptr<Tensor> gamma_tensor = nullptr;
@@ -88,9 +92,8 @@ void GpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
     }
 
     if (use_cpu_fallback_) {
-        // Previous fallback only normalized via sum-of-squares and skipped mean
-        // subtraction, which diverged sharply from ONNX Runtime. Reuse the same
-        // accumulation math as the CUDA path so CPU traces line up.
+        // SimplifiedLayerNormalization is RMSNorm, which normalizes by RMS
+        // without mean subtraction: output = x * rsqrt(mean(x^2) + eps) * gamma
         std::vector<uint8_t> x_cache;
         std::vector<uint8_t> gamma_cache;
         std::vector<uint8_t> beta_cache;

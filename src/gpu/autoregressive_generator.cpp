@@ -29,6 +29,16 @@ AutoregressiveGenerator::AutoregressiveGenerator(
         throw std::runtime_error("Tokenizer path cannot be empty");
     }
 
+    if (config_.eos_token_id < 0) {
+        auto detected = detectEosTokenId(tokenizer_path_);
+        if (detected >= 0) {
+            config_.eos_token_id = detected;
+        } else {
+            config_.eos_token_id = 2;  // fallback
+            LOG_WARN("Could not auto-detect EOS token ID, falling back to 2");
+        }
+    }
+
     LOG_INFO("AutoregressiveGenerator initialized");
     LOG_INFO("  Max tokens: ", config_.max_tokens);
     LOG_INFO("  Temperature: ", config_.temperature);
@@ -102,8 +112,11 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
     bool is_prefill = true;  // First pass processes all prompt tokens
     std::map<std::string, std::shared_ptr<Tensor>> past_kv;  // Store KV-cache between steps
 
-    const char* dump_env = std::getenv("ONNX_ENGINE_DUMP_KV");
-    const bool dump_kv = dump_env && dump_env[0] != '\0' && dump_env[0] != '0';
+    const char* dump_kv_env = std::getenv("ONNX_ENGINE_DUMP_KV");
+    const bool dump_kv = dump_kv_env && dump_kv_env[0] != '\0' && dump_kv_env[0] != '0';
+
+    const char* dump_logits_env = std::getenv("ONNX_ENGINE_DUMP_LOGITS");
+    const bool dump_logits = dump_logits_env && dump_logits_env[0] != '\0' && dump_logits_env[0] != '0';
 
     auto writeBinaryTensor = [&](const std::string& filename,
                                  const Tensor& tensor) {
@@ -112,6 +125,28 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
         out.write(reinterpret_cast<const char*>(tensor.data<float>()),
                   tensor.size() * sizeof(float));
         LOG_INFO("DEBUG wrote ", filename, " (", tensor.size(), " floats)");
+    };
+
+    auto printTensorSample = [&](const std::string& prefix,
+                                 const std::string& name,
+                                 const Tensor& tensor,
+                                 int max_values = 50) {
+        // Print in parseable format: PREFIX name [shape]: [values, ...]
+        std::cout << prefix << " " << name << " " << tensor.shapeStr() << ": [";
+
+        const float* data = tensor.data<float>();
+        int count = std::min(static_cast<int>(tensor.size()), max_values);
+
+        for (int i = 0; i < count; ++i) {
+            std::cout << data[i];
+            if (i < count - 1) std::cout << ", ";
+        }
+
+        if (tensor.size() > static_cast<size_t>(max_values)) {
+            std::cout << ", ...";
+        }
+
+        std::cout << "]" << std::endl;
     };
 
     // Generation loop
@@ -195,6 +230,18 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
                     LOG_DEBUG("Captured KV-cache: ", past_name, " shape: ", tensor->shapeStr());
 
                     if (dump_kv) {
+                        // Print formatted output for debugging
+                        // Convert present.* back to present.* format for output
+                        std::string present_name = "present." + name.substr(8);  // present.X.key
+
+                        // Ensure tensor is on CPU for reading
+                        if (tensor->device() == DeviceType::CUDA) {
+                            tensor->toCPU();
+                        }
+
+                        printTensorSample("KV_CACHE", present_name, *tensor, 50);
+
+                        // Also write binary for deeper analysis
                         std::string sanitized = past_name;
                         std::replace(sanitized.begin(), sanitized.end(), '.', '_');
                         std::ostringstream fname;
@@ -224,7 +271,13 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
                 break;
             }
             logLogitStatistics(*logits, i + 1, past_length, total_length);
-            if (dump_kv) {
+
+            // Dump logits if requested
+            if (dump_logits) {
+                // Print formatted output for debugging
+                printTensorSample("LOGITS", "output", *logits, 100);
+
+                // Also write binary for deeper analysis
                 std::ostringstream logits_name;
                 logits_name << "engine_logits_step" << (i + 1) << ".bin";
                 std::ofstream logits_out(logits_name.str(), std::ios::binary);
@@ -310,9 +363,9 @@ std::vector<int64_t> AutoregressiveGenerator::tokenize(const std::string& text) 
         pos += 4;
     }
 
-    // Call Python tokenizer script
-    // Note: Assumes execution from build/ directory, so script is at ../scripts/
-    std::string cmd = "python3 ../scripts/hf_tokenizer.py --tokenizer '" + tokenizer_path_ +
+    // Find and call Python tokenizer script
+    std::string script_path = findTokenizerScript();
+    std::string cmd = "python3 " + script_path + " --tokenizer '" + tokenizer_path_ +
                      "' --encode '" + escaped_text + "' 2>&1";
 
     std::string output = execCommand(cmd);
@@ -347,9 +400,9 @@ std::string AutoregressiveGenerator::decode(const std::vector<int64_t>& token_id
     }
     std::string ids_str = ids_stream.str();
 
-    // Call Python tokenizer script
-    // Note: Assumes execution from build/ directory, so script is at ../scripts/
-    std::string cmd = "python3 ../scripts/hf_tokenizer.py --tokenizer '" + tokenizer_path_ +
+    // Find and call Python tokenizer script
+    std::string script_path = findTokenizerScript();
+    std::string cmd = "python3 " + script_path + " --tokenizer '" + tokenizer_path_ +
                      "' --decode '" + ids_str + "' 2>&1";
 
     std::string output = execCommand(cmd);
@@ -452,6 +505,87 @@ std::string AutoregressiveGenerator::execCommand(const std::string& cmd) {
     }
 
     return result;
+}
+
+namespace {
+int parseIntAfter(const std::string& text, size_t pos) {
+    size_t colon = text.find(':', pos);
+    if (colon == std::string::npos) return -1;
+    size_t start = text.find_first_of("-0123456789", colon + 1);
+    if (start == std::string::npos) return -1;
+    size_t end = text.find_first_not_of("0123456789", start);
+    std::string num_str = text.substr(start, end == std::string::npos ? end : end - start);
+    try {
+        return std::stoi(num_str);
+    } catch (...) {
+        return -1;
+    }
+}
+} // namespace
+
+int AutoregressiveGenerator::detectEosTokenId(const std::string& tokenizer_path) {
+    std::ifstream in(tokenizer_path);
+    if (!in) {
+        LOG_WARN("Failed to open tokenizer file: ", tokenizer_path);
+        return -1;
+    }
+    std::string json((std::istreambuf_iterator<char>(in)), std::istreambuf_iterator<char>());
+
+    // 1) Try explicit eos_token_id field
+    size_t pos = json.find("\"eos_token_id\"");
+    if (pos != std::string::npos) {
+        int id = parseIntAfter(json, pos);
+        if (id >= 0) {
+            LOG_INFO("Detected eos_token_id=", id, " from tokenizer.json");
+            return id;
+        }
+    }
+
+    // 2) Look for common special tokens
+    const char* markers[] = {"<|endoftext|>", "</s>", "<eos>", "<EOS>"};
+    for (const char* marker : markers) {
+        pos = json.find(marker);
+        if (pos != std::string::npos) {
+            size_t id_pos = json.rfind("\"id\"", pos);
+            if (id_pos != std::string::npos) {
+                int id = parseIntAfter(json, id_pos);
+                if (id >= 0) {
+                    LOG_INFO("Detected eos_token_id=", id, " from special token ", marker);
+                    return id;
+                }
+            }
+        }
+    }
+
+    LOG_WARN("Could not detect eos_token_id from tokenizer.json");
+    return -1;
+}
+
+std::string AutoregressiveGenerator::findTokenizerScript() {
+    // Try multiple possible locations
+    std::vector<std::string> possible_paths = {
+        "scripts/hf_tokenizer.py",           // From project root
+        "../scripts/hf_tokenizer.py",        // From build/ directory
+        "./hf_tokenizer.py",                 // Same directory
+        "../../scripts/hf_tokenizer.py"      // From nested build directories
+    };
+
+    for (const auto& path : possible_paths) {
+        std::ifstream file(path);
+        if (file.good()) {
+            return path;
+        }
+    }
+
+    // If not found, throw an error with helpful message
+    throw std::runtime_error(
+        "Could not find hf_tokenizer.py script. Tried:\n"
+        "  - scripts/hf_tokenizer.py\n"
+        "  - ../scripts/hf_tokenizer.py\n"
+        "  - ./hf_tokenizer.py\n"
+        "  - ../../scripts/hf_tokenizer.py\n"
+        "Make sure you're running from the project root or build/ directory."
+    );
 }
 
 std::map<std::string, std::shared_ptr<Tensor>>

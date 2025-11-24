@@ -52,34 +52,30 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
     float epsilon = node.getFloatAttr("epsilon", 1e-5f);
     size_t rows = input->size() / hidden;
 
-    auto sum_tensor = allocateOutput(input->shape());
-    auto output_tensor = allocateOutput(input->shape());
+    const auto& outs = node.outputs();
+    bool need_mean = outs.size() > 1 && !outs[1].empty();
+    bool need_inv = outs.size() > 2 && !outs[2].empty();
+    bool need_sum = outs.size() > 3 && !outs[3].empty();
+    bool need_stats = need_mean || need_inv || need_sum;
 
     auto computeStats = [&](const float* data,
                             std::vector<float>& mean,
                             std::vector<float>& inv_std) {
         for (size_t row = 0; row < rows; ++row) {
             const float* row_ptr = data + row * hidden;
-            double sum = 0.0;
+            double sumsq = 0.0;
             for (size_t col = 0; col < hidden; ++col) {
-                sum += static_cast<double>(row_ptr[col]);
+                float v = row_ptr[col];
+                sumsq += static_cast<double>(v) * v;
             }
-            double mean_val = sum / static_cast<double>(hidden);
-            double var_acc = 0.0;
-            for (size_t col = 0; col < hidden; ++col) {
-                double diff = static_cast<double>(row_ptr[col]) - mean_val;
-                var_acc += diff * diff;
-            }
-            double variance = var_acc / static_cast<double>(hidden);
-            mean[row] = static_cast<float>(mean_val);
-            inv_std[row] = 1.0f / std::sqrt(static_cast<float>(variance) + epsilon);
+            double mean_sq = sumsq / static_cast<double>(hidden);
+            mean[row] = 0.0f;
+            inv_std[row] = 1.0f / std::sqrt(static_cast<float>(mean_sq) + epsilon);
         }
     };
 
-    const auto& outs = node.outputs();
-    bool need_mean = outs.size() > 1 && !outs[1].empty();
-    bool need_inv = outs.size() > 2 && !outs[2].empty();
-    bool need_stats = need_mean || need_inv;
+    std::shared_ptr<Tensor> sum_tensor = need_stats ? allocateOutput(input->shape()) : nullptr;
+    auto output_tensor = allocateOutput(input->shape());
 
     if (use_cpu_fallback_) {
         std::vector<uint8_t> input_cache;
@@ -91,26 +87,19 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
         const float* gamma_data = getHostData<float>(gamma, gamma_cache);
         const float* beta_data = beta ? getHostData<float>(beta, beta_cache) : nullptr;
 
-        float* sum_data = sum_tensor->data<float>();
+        float* sum_data = sum_tensor ? sum_tensor->data<float>() : nullptr;
         float* output_data = output_tensor->data<float>();
 
         if (num_cpu_threads_ > 1) {
-            kernels::addCPUMultiThreaded(input_data, skip_data, sum_data,
-                                         static_cast<int>(input->size()),
-                                         num_cpu_threads_);
-        } else {
-            kernels::addCPU(input_data, skip_data, sum_data,
-                            static_cast<int>(input->size()));
-        }
-
-        if (num_cpu_threads_ > 1) {
-            kernels::simplifiedLayerNormCPUMultiThreaded(
-                sum_data, gamma_data, beta_data, output_data,
+            kernels::skipSimplifiedLayerNormCPUMultiThreaded(
+                input_data, skip_data, gamma_data, beta_data, output_data,
+                sum_data,
                 static_cast<int>(rows), static_cast<int>(hidden),
                 epsilon, num_cpu_threads_);
         } else {
-            kernels::simplifiedLayerNormCPU(
-                sum_data, gamma_data, beta_data, output_data,
+            kernels::skipSimplifiedLayerNormCPU(
+                input_data, skip_data, gamma_data, beta_data, output_data,
+                sum_data,
                 static_cast<int>(rows), static_cast<int>(hidden),
                 epsilon);
         }
@@ -120,18 +109,17 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
         if (gamma->device() == DeviceType::CPU) gamma->toGPU();
         if (beta && beta->device() == DeviceType::CPU) beta->toGPU();
 
-        kernels::launchAdd(input->data<float>(), skip->data<float>(),
-                           sum_tensor->data<float>(),
-                           static_cast<int>(input->size()));
-
         const float* gamma_dev = gamma->data<float>();
         const float* beta_dev = beta ? beta->data<float>() : nullptr;
+        float* residual_dev = sum_tensor ? sum_tensor->data<float>() : nullptr;
 
-        kernels::launchSimplifiedLayerNorm(
-            sum_tensor->data<float>(),
+        kernels::launchSkipSimplifiedLayerNorm(
+            input->data<float>(),
+            skip->data<float>(),
             gamma_dev,
             beta_dev,
             output_tensor->data<float>(),
+            residual_dev,
             static_cast<int>(rows),
             static_cast<int>(hidden),
             epsilon,
@@ -142,6 +130,18 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
     std::shared_ptr<Tensor> mean_tensor = nullptr;
     std::shared_ptr<Tensor> invstd_tensor = nullptr;
     if (need_stats) {
+        if (!sum_tensor) {
+            sum_tensor = allocateOutput(input->shape());
+            // populate on CPU for stats if we avoided computing residual earlier
+            std::vector<uint8_t> input_cache2;
+            std::vector<uint8_t> skip_cache2;
+            const float* input_data = getHostData<float>(input, input_cache2);
+            const float* skip_data = getHostData<float>(skip, skip_cache2);
+            float* sum_data = sum_tensor->data<float>();
+            for (size_t idx = 0; idx < input->size(); ++idx) {
+                sum_data[idx] = input_data[idx] + skip_data[idx];
+            }
+        }
         std::vector<uint8_t> sum_cache;
         const float* host_sum = getHostData<float>(sum_tensor, sum_cache);
         std::vector<float> mean(rows, 0.0f);
@@ -167,7 +167,7 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
     }
 
     if (!use_cpu_fallback_) {
-        if (sum_tensor->device() == DeviceType::CPU) sum_tensor->toGPU();
+        if (sum_tensor && sum_tensor->device() == DeviceType::CPU) sum_tensor->toGPU();
         if (output_tensor->device() == DeviceType::CPU) output_tensor->toGPU();
     }
 
@@ -180,7 +180,7 @@ void GpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
     if (need_inv) {
         tensors_[outs[2]] = invstd_tensor;
     }
-    if (outs.size() > 3 && !outs[3].empty()) {
+    if (need_sum) {
         tensors_[outs[3]] = sum_tensor;
     }
 }
