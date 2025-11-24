@@ -10,9 +10,17 @@ OnnxRunner is a custom ONNX GPU execution engine built with C++17 and CUDA. It p
 
 The project uses CMake (minimum 3.18) with both C++ and CUDA compilation.
 
-**Initial setup:**
+**Quick automated setup (recommended):**
 ```bash
-./scripts/setup_onnx_proto.sh  # Downloads and compiles ONNX protobuf definitions
+./scripts/setup/full_setup.sh  # Complete setup: dependencies, model download, proto setup, build
+```
+
+This downloads SmolLM2-135M (~500MB) and builds the project automatically.
+
+**Manual setup:**
+```bash
+./scripts/setup/setup_onnx_proto.sh  # Downloads and compiles ONNX protobuf definitions
+python3 scripts/setup/download_model.py  # Optional: download SmolLM2-135M model + tokenizer
 ```
 
 **Configure GPU architecture in CMakeLists.txt:**
@@ -81,7 +89,7 @@ firefox visualization/benchmark_viewer.html
 
 **Create test models:**
 ```bash
-python3 scripts/create_test_model.py
+python3 scripts/export_models.py
 ```
 
 ## Architecture
