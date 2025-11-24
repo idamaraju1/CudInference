@@ -12,10 +12,10 @@ namespace onnx_runner {
 // Non-interleaved mode: [x0, x1, ..., x_{d/2-1}, x_{d/2}, ..., x_{d-1}]
 // Interleaved mode: [x0, x1, x2, x3, ...] where pairs are (x0,x1), (x2,x3)
 __global__ void ropeKernel(
-    const float* input,        // [batch * seq, num_heads, head_size]
-    const float* cos_cache,    // [batch * seq, rotary_half]
-    const float* sin_cache,    // [batch * seq, rotary_half]
-    float* output,             // [batch * seq, num_heads, head_size]
+    const float* __restrict__ input,        // [batch * seq, num_heads, head_size]
+    const float* __restrict__ cos_cache,    // [batch * seq, rotary_half]
+    const float* __restrict__ sin_cache,    // [batch * seq, rotary_half]
+    float* __restrict__ output,             // [batch * seq, num_heads, head_size]
     int batch_seq,             // batch * sequence_length
     int num_heads,
     int head_size,
@@ -35,31 +35,30 @@ __global__ void ropeKernel(
     const float* cos_vals = cos_cache + token_idx * rotary_half;
     const float* sin_vals = sin_cache + token_idx * rotary_half;
 
-    if (!interleaved) {
-        // Non-interleaved: first half [0...rotary_half-1], second half [rotary_half...rotary_dim-1]
-        if (tid < rotary_half) {
-            float x1 = input_head[tid];
-            float x2 = input_head[tid + rotary_half];
-            float c = cos_vals[tid];
-            float s = sin_vals[tid];
+    for (int pair = tid; pair < rotary_half; pair += blockDim.x) {
+        int idx0, idx1;
 
-            output_head[tid] = x1 * c - x2 * s;
-            output_head[tid + rotary_half] = x2 * c + x1 * s;
+        if (!interleaved) {
+            // Non-interleaved: first half [0...rotary_half-1], second half [rotary_half...rotary_dim-1]
+            idx0 = pair;
+            idx1 = pair + rotary_half;
+        } else {
+            // Interleaved: pairs at [2i, 2i+1]
+            idx0 = pair * 2;
+            idx1 = idx0 + 1;
         }
-    } else {
-        // Interleaved: pairs at [2i, 2i+1]
-        if (tid < rotary_half) {
-            int even_idx = tid * 2;
-            int odd_idx = even_idx + 1;
-            float x_even = input_head[even_idx];
-            float x_odd = input_head[odd_idx];
-            float c = cos_vals[tid];
-            float s = sin_vals[tid];
 
-            output_head[even_idx] = x_even * c - x_odd * s;
-            output_head[odd_idx] = x_odd * c + x_even * s;
-        }
+        float x0 = input_head[idx0];
+        float x1 = input_head[idx1];
+        float c  = cos_vals[pair];
+        float s  = sin_vals[pair];
+
+        // standard RoPE rotation.
+        output_head[idx0] = x0 * c - x1 * s;
+        output_head[idx1] = x1 * c + x0 * s;
     }
+
+
 
     // Copy non-rotated dimensions
     for (int i = rotary_dim + tid; i < head_size; i += blockDim.x) {

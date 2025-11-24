@@ -112,6 +112,9 @@ __global__ void gqaKernel(
     const float* key_head = K_storage + ((b * kv_heads + kv_head) * total_seq * head_dim);
     const float* value_head = V_storage + ((b * kv_heads + kv_head) * total_seq * head_dim);
 
+    // precompute score base index.
+    int base_score_idx = ((b * q_heads + qh) * q_seq + qs) * total_seq;
+
     // Phase 1: Compute attention scores and find max
     float thread_max = -INFINITY;
 
@@ -121,6 +124,7 @@ __global__ void gqaKernel(
 
         // Compute dot product Q·K
         float dot = 0.0f;
+        #pragma unroll
         for (int d = 0; d < head_dim; ++d) {
             dot += q_vec[d] * k_vec[d];
         }
@@ -132,8 +136,7 @@ __global__ void gqaKernel(
         }
 
         // Store score
-        int score_idx = ((b * q_heads + qh) * q_seq + qs) * total_seq + t;
-        scores_temp[score_idx] = score;
+        scores_temp[base_score_idx + t] = score;
 
         thread_max = fmaxf(thread_max, score);
     }
@@ -150,9 +153,9 @@ __global__ void gqaKernel(
 
     for (int t = tid; t < allowed; t += blockDim.x) {
         int score_idx = ((b * q_heads + qh) * q_seq + qs) * total_seq + t;
-        float score = scores_temp[score_idx];
+        float score = scores_temp[base_score_idx + t];
         float expval = expf(score - max_score);
-        scores_temp[score_idx] = expval;
+        scores_temp[base_score_idx + t] = expval;
         thread_sum += expval;
     }
 
@@ -165,32 +168,22 @@ __global__ void gqaKernel(
 
     float inv_sum = (sum > 0.0f) ? (1.0f / sum) : 0.0f;
 
-    // Phase 3: Compute weighted sum over values
-    // Use shared memory to accumulate output vector
-    float* out_vec = smem + head_dim; // Reuse shared memory after Q
+    // Phase 3: Compute weighted sum over values (no atomic ops)
+    // Each thread owns a subset of d
 
-    // Initialize output accumulator
-    for (int d = tid; d < head_dim; d += blockDim.x) {
-        out_vec[d] = 0.0f;
-    }
-    __syncthreads();
-
-    // Each thread accumulates its subset of values
-    for (int t = tid; t < allowed; t += blockDim.x) {
-        int score_idx = ((b * q_heads + qh) * q_seq + qs) * total_seq + t;
-        float weight = scores_temp[score_idx] * inv_sum;
-        const float* v_vec = value_head + t * head_dim;
-
-        for (int d = 0; d < head_dim; ++d) {
-            atomicAdd(&out_vec[d], weight * v_vec[d]);
-        }
-    }
-    __syncthreads();
-
-    // Write output
     float* out_dst = output + (b * q_seq + qs) * q_hidden + qh * head_dim;
+
     for (int d = tid; d < head_dim; d += blockDim.x) {
-        out_dst[d] = out_vec[d];
+        float acc = 0.0f;
+
+        // Loop over all allowed key positions
+        for (int t = 0; t < allowed; ++t) {
+            float weight = scores_temp[base_score_idx + t] * inv_sum;
+            const float* v_vec = value_head + t * head_dim;
+            acc += weight * v_vec[d];
+        }
+
+        out_dst[d] = acc;
     }
 }
 
@@ -320,7 +313,7 @@ void launchGroupQueryAttention(
         // Configure kernel launch
         dim3 grid(batch, q_heads, q_seq);
         int block_size = 256;
-        size_t smem_size = (head_dim * 2) * sizeof(float); // Q vector + output accumulator
+        size_t smem_size = head_dim * sizeof(float); // only Q vector
 
         gqaKernel<<<grid, block_size, smem_size>>>(
             Q, K_storage, V_storage, output, d_scores_temp,
