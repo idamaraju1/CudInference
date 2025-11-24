@@ -97,23 +97,25 @@ fi
 # Setup ONNX protobuf definitions
 echo ""
 echo "Step 4: Setting up ONNX protobuf definitions..."
-cd "$PROJECT_ROOT"
-if [ -f "scripts/setup/setup_onnx_proto.sh" ]; then
-    chmod +x scripts/setup/setup_onnx_proto.sh
-    ./scripts/setup/setup_onnx_proto.sh
+PROTO_SCRIPT="$SCRIPT_DIR/setup_onnx_proto.sh"
+
+if [ -f "$PROTO_SCRIPT" ]; then
+    chmod +x "$PROTO_SCRIPT"
+    "$PROTO_SCRIPT"
     echo "✓ ONNX protobuf setup complete"
 else
-    echo "✗ setup_onnx_proto.sh not found"
+    echo "✗ setup_onnx_proto.sh not found at $PROTO_SCRIPT"
     exit 1
 fi
 
 # Build the project
 echo ""
 echo "Step 5: Building OnnxRunner..."
-mkdir -p build
-cd build
-cmake .. -DCMAKE_BUILD_TYPE=Release
-make -j$(nproc)
+BUILD_DIR="$PROJECT_ROOT/build"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+cmake "$PROJECT_ROOT" -DCMAKE_BUILD_TYPE=Release
+make -j"$(nproc)"
 echo "✓ Build complete"
 
 # Install Python dependencies for testing
