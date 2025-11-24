@@ -5,8 +5,13 @@
 set -e
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# Go two levels up to reach ONNX-GPU-Execution-Engine root
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 ONNX_PROTO_DIR="$PROJECT_ROOT/third_party/onnx"
+
+
+# Ensure all downloads land in the project root tree
+cd "$PROJECT_ROOT"
 
 echo "Setting up ONNX protobuf files..."
 
@@ -50,27 +55,3 @@ echo "ONNX protobuf setup complete!"
 echo "Generated files:"
 ls -lh "$ONNX_PROTO_DIR"/*.pb.* 2>/dev/null || echo "Checking for generated files..."
 ls -lh "$ONNX_PROTO_DIR"/*.cc "$ONNX_PROTO_DIR"/*.h 2>/dev/null || echo "No generated files found"
-
-SENTENCEPIECE_DIR="$PROJECT_ROOT/third_party/sentencepiece"
-echo
-echo "==============================================="
-echo " Cloning and building SentencePiece"
-echo "==============================================="
-# Clone SentencePiece if not already present
-if [ ! -d "$SENTENCEPIECE_DIR" ]; then
-echo "[*] Cloning SentencePiece..."
-git clone https://github.com/google/sentencepiece.git "$SENTENCEPIECE_DIR"
-else
-echo "[*] SentencePiece already exists, pulling latest changes..."
-cd "$SENTENCEPIECE_DIR"
-git pull
-fi
-# Build SentencePiece
-cd "$SENTENCEPIECE_DIR"
-mkdir -p build && cd build
-echo "[*] Configuring and building SentencePiece..."
-cmake .. -DCMAKE_BUILD_TYPE=Release -DSPM_ENABLE_SHARED=OFF
-cmake --build . --config Release -j"$(nproc || sysctl -n hw.ncpu || echo 4)"
-echo "[+] SentencePiece build complete!"
-echo "Library built at: $SENTENCEPIECE_DIR/build"
-echo
