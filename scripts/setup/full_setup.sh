@@ -18,7 +18,7 @@ echo "=== Checking dependencies ==="
 
 echo
 echo "=== Downloading model and tokenizer ==="
-"$SETUP_DIR/download_model_and_tokenizer.sh"
+python3 "$SETUP_DIR/download_model.py"
 
 echo
 echo "=== Setting up ONNX protobufs and SentencePiece ==="

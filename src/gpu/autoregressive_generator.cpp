@@ -104,6 +104,11 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
 
     LOG_INFO("Starting generation with ", current_tokens.size(), " prompt tokens");
 
+    bool debug_repeat = false;
+    if (const char* env = std::getenv("ONNX_ENGINE_DEBUG_REPEAT")) {
+        debug_repeat = env[0] != '\0' && env[0] != '0';
+    }
+
     size_t streamed_chars = 0;
     if (config_.stream_stdout) {
         std::string prompt_text = decode(current_tokens);
@@ -186,6 +191,16 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
                      ": past_length=", past_length,
                      ", input_seq_len=", seq_len,
                      ", total_seq=", total_length);
+
+            if (debug_repeat) {
+                std::cout << "[DEBUG_REPEAT][STEP] idx=" << (i + 1)
+                          << " mode=" << (is_prefill ? "prefill" : "decode")
+                          << " past_len=" << past_length
+                          << " start_pos=" << start_position
+                          << " seq_len=" << seq_len
+                          << " total_len=" << total_length
+                          << std::endl;
+            }
 
 
             // Create input tensors
@@ -618,6 +633,10 @@ AutoregressiveGenerator::createInputTensors(const std::vector<int64_t>& token_id
                                            int64_t start_position,
                                            const std::map<std::string, std::shared_ptr<Tensor>>& past_kv) {
     std::map<std::string, std::shared_ptr<Tensor>> inputs;
+    bool debug_repeat = false;
+    if (const char* env = std::getenv("ONNX_ENGINE_DEBUG_REPEAT")) {
+        debug_repeat = env[0] != '\0' && env[0] != '0';
+    }
 
     int64_t seq_len = static_cast<int64_t>(token_ids.size());
     int64_t cached_past_len = inferPastLength(past_kv);
@@ -747,6 +766,22 @@ AutoregressiveGenerator::createInputTensors(const std::vector<int64_t>& token_id
         if (config_.verbose) {
             LOG_DEBUG("Created position_ids with shape [1, ", seq_len,
                      "], values: [", start_position, "..", start_position + seq_len - 1, "]");
+        }
+        if (debug_repeat) {
+            std::cout << "[DEBUG_REPEAT][INPUT] start_pos=" << start_position
+                      << " seq_len=" << seq_len
+                      << " position_ids=";
+            for (int64_t i = 0; i < seq_len; ++i) {
+                std::cout << pos_data[i];
+                if (i + 1 < seq_len) std::cout << ",";
+            }
+            std::cout << " attention_mask_len=";
+            if (inputs.count("attention_mask")) {
+                std::cout << inputs["attention_mask"]->dim(1);
+            } else {
+                std::cout << -1;
+            }
+            std::cout << " past_len=" << cached_past_len << std::endl;
         }
     }
 

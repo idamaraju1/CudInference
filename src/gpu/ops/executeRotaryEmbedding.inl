@@ -89,6 +89,10 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
     std::vector<uint8_t> position_cache;
     std::vector<int64_t> position_converted;
     const int64_t* position_data = nullptr;
+    bool debug_repeat = false;
+    if (const char* env = std::getenv("ONNX_ENGINE_DEBUG_REPEAT")) {
+        debug_repeat = env[0] != '\0' && env[0] != '0';
+    }
 
     if (position_tensor) {
         switch (position_tensor->dtype()) {
@@ -128,14 +132,20 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
     const auto& cos_shape = cos_tensor->shape();
     std::vector<float> selected_cos(batch * sequence_length * rotary_half);
     std::vector<float> selected_sin(batch * sequence_length * rotary_half);
+    int batch_seq = static_cast<int>(batch * sequence_length);
 
     // Select appropriate cos/sin values based on position_ids
+    int64_t pos_min = std::numeric_limits<int64_t>::max();
+    int64_t pos_max = std::numeric_limits<int64_t>::min();
+
     if (cos_shape.size() == 2) {
         size_t max_positions = static_cast<size_t>(cos_shape[0]);
         size_t dim = static_cast<size_t>(cos_shape[1]);
         for (size_t b = 0; b < batch; ++b) {
             for (size_t s = 0; s < sequence_length; ++s) {
                 int64_t pos = fetchPositionId(b, s);
+                pos_min = std::min(pos_min, pos);
+                pos_max = std::max(pos_max, pos);
                 if (pos < 0 || pos >= static_cast<int64_t>(max_positions)) {
                     pos = std::min(std::max<int64_t>(0, pos), static_cast<int64_t>(max_positions - 1));
                 }
@@ -153,6 +163,9 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
         for (size_t b = 0; b < batch; ++b) {
             size_t b_idx = cache_batch == 1 ? 0 : b;
             for (size_t s = 0; s < sequence_length; ++s) {
+                int64_t pos = fetchPositionId(b, s);
+                pos_min = std::min(pos_min, pos);
+                pos_max = std::max(pos_max, pos);
                 size_t s_idx = cache_seq == 1 ? 0 : s;
                 size_t src_offset = (b_idx * cache_seq + s_idx) * dim;
                 size_t dst_offset = (b * sequence_length + s) * rotary_half;
@@ -160,6 +173,18 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
                 std::memcpy(&selected_sin[dst_offset], &sin_data[src_offset], rotary_half * sizeof(float));
             }
         }
+    }
+
+    if (debug_repeat) {
+        std::cout << "[DEBUG_REPEAT][RoPE] cos_shape=" << cos_tensor->shapeStr()
+                  << " sin_shape=" << sin_tensor->shapeStr()
+                  << " positions[min=" << pos_min << ", max=" << pos_max << "]"
+                  << " rotary_dim=" << rotary_dim
+                  << " interleaved=" << interleaved
+                  << " num_heads=" << num_heads
+                  << " head_size=" << head_size
+                  << " batch_seq=" << batch_seq
+                  << std::endl;
     }
 
     // Convert input layout if needed: BNSH -> BSNH
@@ -185,8 +210,6 @@ void GpuExecutor::executeRotaryEmbedding(const Node& node) {
     // Allocate output
     auto output = allocateOutput(data_tensor->shape(), DataType::FLOAT32);
     std::vector<float> rotated(data_tensor->size());
-
-    int batch_seq = static_cast<int>(batch * sequence_length);
 
     // ========================================================================
     // CPU_ONLY and GPU modes (GPU_COPY + GPU_PERSISTENT)

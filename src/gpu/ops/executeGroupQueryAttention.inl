@@ -166,6 +166,11 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
     // GPU_PERSISTENT MODE: Exact same logic as GPU_COPY but on GPU
     // ========================================================================
     if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        bool debug_repeat = false;
+        if (const char* env = std::getenv("ONNX_ENGINE_DEBUG_REPEAT")) {
+            debug_repeat = env[0] != '\0' && env[0] != '0';
+        }
+
         // Ensure inputs are on GPU
         Q->ensureOnGPU();
         K->ensureOnGPU();
@@ -279,6 +284,20 @@ void GpuExecutor::executeGroupQueryAttention(const Node& node) {
             false,
             num_cpu_threads_
         );
+
+        if (debug_repeat) {
+            size_t allowed0 = valid_lengths.empty() ? total_seq : std::min(valid_lengths[0], past_len + q_seq);
+            std::cout << "[DEBUG_REPEAT][GQA] batch=" << batch
+                      << " q_seq=" << q_seq
+                      << " total_seq=" << total_seq
+                      << " past_len=" << past_len
+                      << " head_dim=" << head_dim
+                      << " valid_len[0]=" << (valid_lengths.empty() ? -1 : valid_lengths[0])
+                      << " allowed0=" << allowed0
+                      << " scale=" << scale
+                      << " softcap=" << softcap
+                      << std::endl;
+        }
 
         tensors_[outputs[0]] = output;
 
