@@ -21,6 +21,7 @@ void printUsage(const char* program_name) {
     std::cout << "Basic Options:\n";
     std::cout << "  --cpu             Use CPU fallback instead of GPU\n";
     std::cout << "  --verbose         Print detailed timing information\n";
+    std::cout << "  --quiet           Suppress logs; stream generated text only\n";
     std::cout << "  --debug           Enable debug logging\n";
     std::cout << "  --help            Show this help message\n\n";
     std::cout << "Benchmark Mode:\n";
@@ -262,6 +263,7 @@ int main(int argc, char** argv) {
     std::string model_path;
     bool use_cpu = false;
     bool verbose = false;
+    bool quiet = false;
     bool debug = false;
     bool benchmark = false;
     bool generate = false;
@@ -289,6 +291,9 @@ int main(int argc, char** argv) {
             }
         } else if (arg == "--verbose") {
             verbose = true;
+        } else if (arg == "--quiet") {
+            quiet = true;
+            verbose = false;
         } else if (arg == "--debug") {
             debug = true;
         } else if (arg == "--benchmark") {
@@ -352,8 +357,15 @@ int main(int argc, char** argv) {
         return 1;
     }
 
+    if (quiet) {
+        verbose = false;
+        debug = false;
+    }
+
     // Configure logger
-    if (debug) {
+    if (quiet) {
+        Logger::instance().setLevel(LogLevel::OFF);
+    } else if (debug) {
         Logger::instance().setLevel(LogLevel::DEBUG);
     }
 
@@ -407,15 +419,18 @@ int main(int argc, char** argv) {
             gen_config.max_tokens = max_tokens;
             gen_config.temperature = temperature;
             gen_config.verbose = verbose;
+            gen_config.stream_stdout = quiet;
 
             AutoregressiveGenerator generator(executor, *graph, tokenizer_path, gen_config);
 
             // Generate text
             std::string generated_text = generator.generate(user_input_text);
 
-            // Display result
-            LOG_INFO("\n=== Generated Text ===");
-            std::cout << generated_text << "\n";
+            // Display result (skip in quiet streaming mode to avoid duplicate text)
+            if (!quiet) {
+                LOG_INFO("\n=== Generated Text ===");
+                std::cout << generated_text << "\n";
+            }
 
             LOG_INFO("\n=== Generation Complete ===");
             return 0;

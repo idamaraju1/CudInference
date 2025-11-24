@@ -104,6 +104,16 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
 
     LOG_INFO("Starting generation with ", current_tokens.size(), " prompt tokens");
 
+    size_t streamed_chars = 0;
+    if (config_.stream_stdout) {
+        std::string prompt_text = decode(current_tokens);
+        if (!prompt_text.empty()) {
+            std::cout << prompt_text;
+            std::cout.flush();
+            streamed_chars = prompt_text.size();
+        }
+    }
+
     // KV-caching is handled by the ONNX model's explicit past_key_values inputs/outputs
     // (not the internal cache in gpu_executor)
 
@@ -305,6 +315,16 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
             current_tokens.push_back(next_token);
             tokens_generated++;
 
+            // Stream newly generated text to stdout if requested
+            if (config_.stream_stdout) {
+                std::string full_text = decode(current_tokens);
+                if (full_text.size() > streamed_chars) {
+                    std::cout << full_text.substr(streamed_chars);
+                    std::cout.flush();
+                    streamed_chars = full_text.size();
+                }
+            }
+
             // Always log the generated token for debugging
             LOG_INFO("Generated token ", tokens_generated, ": ", next_token);
 
@@ -350,6 +370,11 @@ std::vector<int64_t> AutoregressiveGenerator::generateTokens(
     LOG_INFO("Tokens generated: ", tokens_generated);
     LOG_INFO("Total time: ", total_ms, " ms");
     LOG_INFO("Speed: ", tokens_per_sec, " tokens/sec");
+
+    if (config_.stream_stdout) {
+        std::cout << std::endl;
+        std::cout.flush();
+    }
 
     return current_tokens;
 }

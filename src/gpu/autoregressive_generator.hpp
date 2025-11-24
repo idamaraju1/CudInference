@@ -25,6 +25,7 @@ public:
         float temperature = 1.0f;     // Temperature for sampling (0.0 = greedy)
         int eos_token_id = -1;        // End-of-sequence token ID (-1 = auto-detect from tokenizer)
         bool verbose = false;         // Print generation progress
+        bool stream_stdout = false;   // Stream decoded text to stdout as tokens arrive
 
         GenerationConfig() = default;
     };
