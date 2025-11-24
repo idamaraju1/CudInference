@@ -84,7 +84,7 @@ fi
 echo ""
 echo "Step 3: Configuring CMake for GPU architecture..."
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+PROJECT_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
 if [ -f "$PROJECT_ROOT/CMakeLists.txt" ]; then
     sed -i "s/set(CMAKE_CUDA_ARCHITECTURES [0-9]\+)/set(CMAKE_CUDA_ARCHITECTURES $COMPUTE_CAP)/" "$PROJECT_ROOT/CMakeLists.txt"
@@ -98,9 +98,9 @@ fi
 echo ""
 echo "Step 4: Setting up ONNX protobuf definitions..."
 cd "$PROJECT_ROOT"
-if [ -f "scripts/setup_onnx_proto.sh" ]; then
-    chmod +x scripts/setup_onnx_proto.sh
-    ./scripts/setup_onnx_proto.sh
+if [ -f "scripts/setup/setup_onnx_proto.sh" ]; then
+    chmod +x scripts/setup/setup_onnx_proto.sh
+    ./scripts/setup/setup_onnx_proto.sh
     echo "✓ ONNX protobuf setup complete"
 else
     echo "✗ setup_onnx_proto.sh not found"
