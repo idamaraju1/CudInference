@@ -47,24 +47,56 @@ pip install -r scripts/requirements.txt
 
 ## Build Instructions
 
-### 1. Clone the Repository
+### Quick Setup (Automated)
+
+For a complete automated setup that downloads everything and builds the project:
+
+```bash
+./scripts/setup/full_setup.sh
+```
+
+This will:
+1. Check all dependencies
+2. Download SmolLM2-135M model and tokenizer from HuggingFace
+3. Setup ONNX protobuf definitions
+4. Configure and build the project
+
+**Note**: The model download is ~500MB and may take a few minutes depending on your internet connection.
+
+### Manual Setup (Step-by-Step)
+
+If you prefer manual control or want to use your own models:
+
+#### 1. Clone the Repository
 
 ```bash
 git clone <your-repo-url>
-cd ONNX-GPU-Execution-Engine
+cd OnnxRunner
 ```
 
-### 2. Download and Compile ONNX Proto Files
+#### 2. Download and Compile ONNX Proto Files
 
 Run the setup script to download ONNX proto definitions and compile them:
 
 ```bash
-./scripts/setup_onnx_proto.sh
+./scripts/setup/setup_onnx_proto.sh
 ```
 
 This will create the `third_party/onnx/` directory with compiled protobuf files.
 
-### 3. Configure GPU Architecture (Optional)
+#### 3. (Optional) Download Test Model
+
+To download the SmolLM2-135M model for text generation:
+
+```bash
+python3 scripts/setup/download_model.py
+```
+
+This downloads:
+- `model.onnx` - SmolLM2-135M language model (~500MB)
+- `tokenizer.json` - HuggingFace tokenizer
+
+#### 4. Configure GPU Architecture (Optional)
 
 Edit `CMakeLists.txt` line 10 to match your GPU compute capability:
 
@@ -78,7 +110,7 @@ set(CMAKE_CUDA_ARCHITECTURES "75;86;89")
 
 You can specify multiple architectures separated by semicolons, or just one for faster compilation.
 
-### 4. Build the Project
+#### 5. Build the Project
 
 ```bash
 mkdir build
@@ -113,6 +145,7 @@ Options:
   --cpu-threads N   Max CPU threads for benchmark mode (default: auto-detect)
                     Benchmark will test 1 to N threads
   --verbose         Print detailed timing information
+  --quiet           Suppress logs; stream generated text only
   --debug           Enable debug logging
   --benchmark       Run multi-configuration benchmark (CPU 1-N threads + GPU)
   --output FILE     Save benchmark results to JSON file (default: results.json)
@@ -163,23 +196,29 @@ The visualization provides:
 
 ### Text Generation Mode (for LLM models)
 
-Run language models in auto-regressive generation mode:
+Run language models in auto-regressive generation mode.
+
+**Using the downloaded SmolLM2-135M model:**
+
+If you ran `full_setup.sh` or `download_model.py`, you can use the downloaded model:
 
 ```bash
-# Basic example
 ./build/onnx_gpu_engine model.onnx \
   --input "The sky is blue because" \
   --tokenizer tokenizer.json \
   --generate \
   --max-tokens 50 \
   --temperature 0.0
+```
 
-# Example with SmolLM2-135M
-./build/onnx_gpu_engine ../SmolLM2-135M.onnx \
-  --input "The sky is blue because" \
-  --tokenizer ../tokenizer.json \
+**Using a custom model:**
+
+```bash
+./build/onnx_gpu_engine /path/to/your/model.onnx \
+  --input "Your input prompt" \
+  --tokenizer /path/to/tokenizer.json \
   --generate \
-  --max-tokens 5 \
+  --max-tokens 50 \
   --temperature 0.0
 ```
 
@@ -199,19 +238,40 @@ Run language models in auto-regressive generation mode:
 Use the provided Python script to create test ONNX models:
 
 ```bash
-python3 scripts/create_test_model.py
+python3 scripts/export_models.py
 ```
 
-This will generate simple ONNX models for testing the engine.
+This will generate simple ONNX models for testing the engine (simple_linear.onnx, two_layer.onnx, residual.onnx).
 
 ## Supported Operations
 
-Currently implemented operations:
-
-- **MatMul**: Matrix multiplication
-- **Gemm**: General matrix multiply with bias (alpha=1, beta=1)
-- **ReLU**: Rectified Linear Unit activation
+### Arithmetic / Linear Algebra
+- **MatMul**: Matrix multiplication (uses cuBLAS for large matrices)
+- **Gemm**: General matrix multiply with bias (alpha=1, beta=1 only)
 - **Add**: Element-wise addition with scalar broadcasting
+- **Sub**: Element-wise subtraction
+- **Mul**: Element-wise multiplication
+
+### Activations
+- **ReLU**: Rectified Linear Unit (vectorized with float4 optimization)
+- **Sigmoid**: Sigmoid activation function
+
+### Tensor Manipulation
+- **Transpose**: Matrix/tensor transposition
+- **Gather**: Gather elements along an axis using indices
+- **Shape**: Get shape of a tensor (metadata operation)
+- **Cast**: Type conversion between data types
+
+### Reductions
+- **ReduceSum**: Sum reduction along specified axes
+
+### Advanced Operations (LLM Support)
+- **RotaryEmbedding**: Rotary position embeddings for transformers
+- **GroupQueryAttention**: Multi-head attention with grouped queries and KV cache
+- **SimplifiedLayerNormalization**: Layer normalization (epsilon=1e-5)
+- **SkipSimplifiedLayerNormalization**: Layer normalization with skip/residual connection
+
+**Note**: All operations support both CPU (with OpenMP multi-threading) and GPU execution where applicable.
 
 ## Architecture Overview
 
@@ -293,17 +353,28 @@ ONNX-GPU-Execution-Engine/
 │   ├── gpu/                     # GPU execution and benchmarking
 │   │   ├── gpu_executor.*       # Graph executor with CPU/GPU support
 │   │   ├── benchmark.*          # Multi-configuration benchmark system
+│   │   ├── ops/                 # Operation implementations (.inl files)
 │   │   └── kernels/             # CUDA kernels
 │   │       ├── kernels.cuh
 │   │       ├── matmul.cu
 │   │       ├── relu.cu
-│   │       └── add.cu
+│   │       ├── add.cu
+│   │       ├── gather.cu
+│   │       ├── sigmoid.cu
+│   │       ├── layernorm.cu
+│   │       ├── rotary_embedding.cu
+│   │       ├── group_query_attention.cu
+│   │       └── ... (other kernels)
 │   └── utils/                   # Utilities
 │       ├── tensor.*
 │       └── logger.*
 ├── scripts/                     # Build and setup scripts
-│   ├── setup_onnx_proto.sh
-│   └── create_test_model.py
+│   ├── setup/                   # Setup scripts subdirectory
+│   │   ├── setup_onnx_proto.sh
+│   │   └── full_setup.sh
+│   ├── export_models.py
+│   ├── validate_onnx.py
+│   └── hf_tokenizer.py
 ├── visualization/               # Benchmark visualization
 │   └── benchmark_viewer.html   # Interactive HTML dashboard
 ├── third_party/                 # Generated files (not in git)
