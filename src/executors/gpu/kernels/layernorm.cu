@@ -1,4 +1,4 @@
-#include "kernels.cuh"
+#include "gpu_kernels.cuh"
 #include <cuda_runtime.h>
 #include <stdexcept>
 #include <cmath>
@@ -291,129 +291,9 @@ void launchSkipSimplifiedLayerNorm(const float* X,
 }
 
 // ---- CPU fallbacks (match header names exactly) ----
-void simplifiedLayerNormCPU(const float* X,
-                            const float* gamma,
-                            const float* beta,
-                            float* Y,
-                            int M, int N,
-                            float epsilon) {
-    for (int r = 0; r < M; ++r) {
-        const float* x = X + r * N;
-        float* y       = Y + r * N;
 
-        double sumsq = 0.0;  // better accumulator precision
-        for (int i = 0; i < N; ++i) {
-            float v = x[i];
-            sumsq += double(v) * v;
-        }
-        double mean_sq = sumsq / static_cast<double>(N);
-        float inv_rms = rsqrtf(static_cast<float>(mean_sq) + epsilon);
 
-        for (int i = 0; i < N; ++i) {
-            float v = x[i] * inv_rms;
-            if (gamma) v *= gamma[i];
-            if (beta)  v += beta[i];
-            y[i] = v;
-        }
-    }
-}
 
-void simplifiedLayerNormCPUMultiThreaded(const float* X,
-                                         const float* gamma,
-                                         const float* beta,
-                                         float* Y,
-                                         int M, int N,
-                                         float epsilon,
-                                         int num_threads) {
-    #pragma omp parallel for num_threads(num_threads) schedule(static)
-    for (int r = 0; r < M; ++r) {
-        const float* x = X + r * N;
-        float* y       = Y + r * N;
-
-        double sumsq = 0.0;
-        for (int i = 0; i < N; ++i) {
-            float v = x[i];
-            sumsq += double(v) * v;
-        }
-        double mean_sq = sumsq / static_cast<double>(N);
-        float inv_rms = rsqrtf(static_cast<float>(mean_sq) + epsilon);
-
-        for (int i = 0; i < N; ++i) {
-            float v = x[i] * inv_rms;
-            if (gamma) v *= gamma[i];
-            if (beta)  v += beta[i];
-            y[i] = v;
-        }
-    }
-}
-
-void skipSimplifiedLayerNormCPU(const float* X,
-                                const float* Skip,
-                                const float* gamma,
-                                const float* beta,
-                                float* Y,
-                                float* residual_out,
-                                int M, int N,
-                                float epsilon) {
-    for (int r = 0; r < M; ++r) {
-        const float* x = X + r * N;
-        const float* s = Skip + r * N;
-        float* y = Y + r * N;
-        float* residual = residual_out ? (residual_out + r * N) : nullptr;
-
-        double sumsq = 0.0;
-        for (int i = 0; i < N; ++i) {
-            float val = x[i] + s[i];
-            if (residual) residual[i] = val;
-            sumsq += double(val) * val;
-        }
-        double mean_sq = sumsq / static_cast<double>(N);
-        float inv_rms = rsqrtf(static_cast<float>(mean_sq) + epsilon);
-
-        for (int i = 0; i < N; ++i) {
-            float r_val = residual ? residual[i] : (x[i] + s[i]);
-            float v = r_val * inv_rms;
-            if (gamma) v *= gamma[i];
-            if (beta)  v += beta[i];
-            y[i] = v;
-        }
-    }
-}
-
-void skipSimplifiedLayerNormCPUMultiThreaded(const float* X,
-                                             const float* Skip,
-                                             const float* gamma,
-                                             const float* beta,
-                                             float* Y,
-                                             float* residual_out,
-                                             int M, int N,
-                                             float epsilon,
-                                             int num_threads) {
-    #pragma omp parallel for num_threads(num_threads) schedule(static)
-    for (int r = 0; r < M; ++r) {
-        const float* x = X + r * N;
-        const float* s = Skip + r * N;
-        float* y = Y + r * N;
-        float* residual = residual_out ? (residual_out + r * N) : nullptr;
-
-        double sumsq = 0.0;
-        for (int i = 0; i < N; ++i) {
-            float val = x[i] + s[i];
-            if (residual) residual[i] = val;
-            sumsq += double(val) * val;
-        }
-        double mean_sq = sumsq / static_cast<double>(N);
-        float inv_rms = rsqrtf(static_cast<float>(mean_sq) + epsilon);
-
-        for (int i = 0; i < N; ++i) {
-            float r_val = residual ? residual[i] : (x[i] + s[i]);
-            float v = r_val * inv_rms;
-            if (gamma) v *= gamma[i];
-            if (beta)  v += beta[i];
-            y[i] = v;
-        }
-    }
-}
 
 } // namespace kernels
 } // namespace onnx_runner

@@ -1,4 +1,4 @@
-#include "kernels.cuh"
+#include "gpu_kernels.cuh"
 #include <cuda_runtime.h>
 #include <omp.h>
 #include <cstring>

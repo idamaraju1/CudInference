@@ -1,4 +1,4 @@
-#include "kernels.cuh"
+#include "gpu_kernels.cuh"
 #include <cuda_runtime.h>
 #include <omp.h>
 #include <cmath>
@@ -37,21 +37,7 @@ __global__ void sigmoidKernelVectorized(const float* input, float* output, int s
 }
 
 // CPU implementation (single-threaded)
-void sigmoidCPU(const float* input, float* output, int size) {
-    for (int i = 0; i < size; ++i) {
-        float x = input[i];
-        output[i] = 1.0f / (1.0f + std::exp(-x));
-    }
-}
 
-// Multi-threaded CPU implementation using OpenMP
-void sigmoidCPUMultiThreaded(const float* input, float* output, int size, int num_threads) {
-    #pragma omp parallel for num_threads(num_threads)
-    for (int i = 0; i < size; ++i) {
-        float x = input[i];
-        output[i] = 1.0f / (1.0f + std::exp(-x));
-    }
-}
 
 // Launcher function
 void launchSigmoid(const float* input, float* output, int size, cudaStream_t stream) {

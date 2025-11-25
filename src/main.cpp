@@ -1,8 +1,9 @@
 #include "core/model_parser.hpp"
 #include "core/graph.hpp"
-#include "gpu/gpu_executor.hpp"
-#include "gpu/benchmark.hpp"
-#include "gpu/autoregressive_generator.hpp"
+#include "executors/gpu_executor.hpp"
+#include "executors/cpu_executor.hpp"
+#include "executors/benchmark.hpp"
+#include "executors/autoregressive_generator.hpp"
 #include "utils/logger.hpp"
 #include "utils/tensor.hpp"
 #include <iostream>
@@ -523,18 +524,24 @@ int main(int argc, char** argv) {
             // Normal execution mode
             LOG_INFO("\n=== Executing Graph ===");
 
-            GpuExecutor executor(use_cpu);
-            executor.setVerbose(verbose);
-
-            // Enable GPU_PERSISTENT mode for minimal CPU-GPU transfers
-            if (!use_cpu) {
-                executor.setExecutionMode(GpuExecutor::ExecutionMode::GPU_PERSISTENT);
+            // Create appropriate executor based on use_cpu flag
+            std::shared_ptr<Executor> executor;
+            if (use_cpu) {
+                auto cpu_exec = std::make_shared<CpuExecutor>(cpu_threads > 0 ? cpu_threads : 1);
+                cpu_exec->setVerbose(verbose);
+                executor = cpu_exec;
+            } else {
+                auto gpu_exec = std::make_shared<GpuExecutor>(false);
+                gpu_exec->setVerbose(verbose);
+                // Enable GPU_PERSISTENT mode for minimal CPU-GPU transfers
+                gpu_exec->setExecutionMode(GpuExecutor::ExecutionMode::GPU_PERSISTENT);
                 LOG_INFO("GPU_PERSISTENT mode enabled - tensors stay on GPU");
+                executor = gpu_exec;
             }
 
             auto exec_start = std::chrono::high_resolution_clock::now();
 
-            outputs = executor.execute(*graph, inputs);
+            outputs = executor->execute(*graph, inputs);
 
             auto exec_end = std::chrono::high_resolution_clock::now();
             auto exec_duration = std::chrono::duration_cast<std::chrono::milliseconds>(

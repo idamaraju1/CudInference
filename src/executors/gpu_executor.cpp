@@ -1,5 +1,5 @@
 #include "gpu_executor.hpp"
-#include "kernels/kernels.cuh"
+#include "gpu/kernels/gpu_kernels.cuh"
 #include "../utils/logger.hpp"
 #include <cuda_fp16.h>
 #include <stdexcept>
@@ -589,22 +589,22 @@ void GpuExecutor::executeNode(const Node& node) {
     }
 }
 
-#include "ops/executeMatMul.inl"
-#include "ops/executeReLU.inl"
-#include "ops/executeAdd.inl"
-#include "ops/executeSub.inl"
-#include "ops/executeGemm.inl"
-#include "ops/executeGather.inl"
-#include "ops/executeMul.inl"
-#include "ops/executeTranspose.inl"
-#include "ops/executeShape.inl"
-#include "ops/executeCast.inl"
-#include "ops/executeSigmoid.inl"
-#include "ops/executeReduceSum.inl"
-#include "ops/executeSimplifiedLayerNormalization.inl"
-#include "ops/executeSkipSimplifiedLayerNormalization.inl"
-#include "ops/executeRotaryEmbedding.inl"
-#include "ops/executeGroupQueryAttention.inl"
+#include "gpu/ops/executeMatMul.inl"
+#include "gpu/ops/executeReLU.inl"
+#include "gpu/ops/executeAdd.inl"
+#include "gpu/ops/executeSub.inl"
+#include "gpu/ops/executeGemm.inl"
+#include "gpu/ops/executeGather.inl"
+#include "gpu/ops/executeMul.inl"
+#include "gpu/ops/executeTranspose.inl"
+#include "gpu/ops/executeShape.inl"
+#include "gpu/ops/executeCast.inl"
+#include "gpu/ops/executeSigmoid.inl"
+#include "gpu/ops/executeReduceSum.inl"
+#include "gpu/ops/executeSimplifiedLayerNormalization.inl"
+#include "gpu/ops/executeSkipSimplifiedLayerNormalization.inl"
+#include "gpu/ops/executeRotaryEmbedding.inl"
+#include "gpu/ops/executeGroupQueryAttention.inl"
 
 std::shared_ptr<Tensor> GpuExecutor::getTensor(const std::string& name) {
     auto it = tensors_.find(name);

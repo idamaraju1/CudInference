@@ -46,27 +46,37 @@ set(UTILS_SOURCES
     src/utils/logger.cpp
 )
 
-set(GPU_SOURCES
-    src/gpu/gpu_executor.cpp
-    src/gpu/benchmark.cpp
-    src/gpu/autoregressive_generator.cpp
+set(EXECUTOR_SOURCES
+    src/executors/gpu_executor.cpp
+    src/executors/cpu_executor.cpp
+    src/executors/benchmark.cpp
+    src/executors/autoregressive_generator.cpp
+)
+
+set(CPU_KERNEL_SOURCES
+    src/executors/cpu/kernels/add.cpp
+    src/executors/cpu/kernels/relu.cpp
+    src/executors/cpu/kernels/sub.cpp
+    src/executors/cpu/kernels/matmul.cpp
+    src/executors/cpu/kernels/sigmoid.cpp
+    src/executors/cpu/kernels/layernorm.cpp
 )
 
 set(CUDA_SOURCES
-    src/gpu/kernels/matmul.cu
-    src/gpu/kernels/relu.cu
-    src/gpu/kernels/add.cu
-    src/gpu/kernels/gather.cu
-    src/gpu/kernels/elementwise.cu
-    src/gpu/kernels/reducemean.cu
-    src/gpu/kernels/tensor_ops.cu
-    src/gpu/kernels/layernorm.cu
-    src/gpu/kernels/sub.cu
-    src/gpu/kernels/sigmoid.cu
-    src/gpu/kernels/reducesum.cu
-    src/gpu/kernels/rotary_embedding.cu
-    src/gpu/kernels/group_query_attention.cu
-    src/gpu/kernels/kv_reformat.cu
+    src/executors/gpu/kernels/matmul.cu
+    src/executors/gpu/kernels/relu.cu
+    src/executors/gpu/kernels/add.cu
+    src/executors/gpu/kernels/gather.cu
+    src/executors/gpu/kernels/elementwise.cu
+    src/executors/gpu/kernels/reducemean.cu
+    src/executors/gpu/kernels/tensor_ops.cu
+    src/executors/gpu/kernels/layernorm.cu
+    src/executors/gpu/kernels/sub.cu
+    src/executors/gpu/kernels/sigmoid.cu
+    src/executors/gpu/kernels/reducesum.cu
+    src/executors/gpu/kernels/rotary_embedding.cu
+    src/executors/gpu/kernels/group_query_attention.cu
+    src/executors/gpu/kernels/kv_reformat.cu
 )
 
 # Main executable
@@ -74,7 +84,8 @@ add_executable(onnx_gpu_engine
     src/main.cpp
     ${CORE_SOURCES}
     ${UTILS_SOURCES}
-    ${GPU_SOURCES}
+    ${EXECUTOR_SOURCES}
+    ${CPU_KERNEL_SOURCES}
     ${CUDA_SOURCES}
 )
 

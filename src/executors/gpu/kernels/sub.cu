@@ -1,4 +1,4 @@
-#include "kernels.cuh"
+#include "gpu_kernels.cuh"
 #include <cuda_runtime.h>
 #include <cstdint>
 #include <stdexcept>
@@ -93,18 +93,7 @@ void launchSubScalar(const float* A, float scalar, float* C, int size, cudaStrea
 // CPU Fallbacks
 // ============================================================================
 
-void subCPU(const float* A, const float* B, float* C, int size) {
-    for (int i = 0; i < size; ++i) {
-        C[i] = A[i] - B[i];
-    }
-}
 
-void subCPUMultiThreaded(const float* A, const float* B, float* C, int size, int num_threads) {
-    #pragma omp parallel for num_threads(num_threads)
-    for (int i = 0; i < size; ++i) {
-        C[i] = A[i] - B[i];
-    }
-}
 
 } // namespace kernels
 } // namespace onnx_runner

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "executor.hpp"
 #include "../core/graph.hpp"
 #include "../utils/tensor.hpp"
 #include "../utils/logger.hpp"
@@ -44,7 +45,7 @@ private:
 };
 
 // GpuExecutor manages tensor allocation and graph execution on GPU
-class GpuExecutor {
+class GpuExecutor : public Executor {
 public:
     // Execution modes for GPU memory management
     enum class ExecutionMode {
@@ -64,10 +65,10 @@ public:
     // Returns: map of output names to output tensors
     std::map<std::string, std::shared_ptr<Tensor>>
     execute(const Graph& graph,
-            const std::map<std::string, std::shared_ptr<Tensor>>& inputs);
+            const std::map<std::string, std::shared_ptr<Tensor>>& inputs) override;
 
     // Set whether to print detailed timing information
-    void setVerbose(bool verbose) { verbose_ = verbose; }
+    void setVerbose(bool verbose) override { verbose_ = verbose; }
 
     // Set execution mode (for persistent GPU memory)
     void setExecutionMode(ExecutionMode mode) { exec_mode_ = mode; }

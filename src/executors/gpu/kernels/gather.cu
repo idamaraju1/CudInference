@@ -1,4 +1,4 @@
-#include "kernels.cuh"
+#include "gpu_kernels.cuh"
 #include "utils/tensor.hpp"
 #include <cuda_fp16.h>
 #include <cuda_runtime.h>

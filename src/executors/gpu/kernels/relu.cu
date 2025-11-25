@@ -1,4 +1,4 @@
-#include "kernels.cuh"
+#include "gpu_kernels.cuh"
 #include <cuda_runtime.h>
 #include <cstdint>
 #include <stdexcept>
@@ -78,20 +78,7 @@ void launchReLUInPlace(float* data, int size, cudaStream_t stream) {
     launchReLU(data, data, size, stream);
 }
 
-// CPU fallback
-void reluCPU(const float* input, float* output, int size) {
-    for (int i = 0; i < size; ++i) {
-        output[i] = (input[i] > 0.0f) ? input[i] : 0.0f;
-    }
-}
 
-// Multi-threaded CPU implementation using OpenMP
-void reluCPUMultiThreaded(const float* input, float* output, int size, int num_threads) {
-    #pragma omp parallel for num_threads(num_threads)
-    for (int i = 0; i < size; ++i) {
-        output[i] = (input[i] > 0.0f) ? input[i] : 0.0f;
-    }
-}
 
 } // namespace kernels
 } // namespace onnx_runner
