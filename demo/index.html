@@ -1,0 +1,532 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ONNX Text Autocomplete Demo</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+            background: #f5f5f5;
+        }
+
+        h1 {
+            margin-bottom: 20px;
+            color: #333;
+        }
+
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        label {
+            display: block;
+            margin-bottom: 8px;
+            font-weight: 600;
+            color: #555;
+        }
+
+        .editor-wrapper {
+            position: relative;
+            width: 100%;
+            min-height: 200px;
+        }
+
+        #backdrop {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            min-height: 200px;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            overflow-wrap: break-word;
+            color: transparent;
+            pointer-events: none;
+            background: white;
+        }
+
+        #inputText {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            min-height: 200px;
+            padding: 12px;
+            border: 2px solid #ddd;
+            border-radius: 4px;
+            font-size: 16px;
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            resize: vertical;
+            transition: border-color 0.2s;
+            background: transparent;
+            color: #333;
+        }
+
+        #inputText:focus {
+            outline: none;
+            border-color: #4CAF50;
+        }
+
+        #backdrop:focus-within {
+            border-color: #4CAF50;
+        }
+
+        .suggestion {
+            color: #999;
+        }
+
+        .status {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 4px;
+            font-size: 14px;
+            text-align: center;
+        }
+
+        .status.generating {
+            background: #E3F2FD;
+            color: #1976D2;
+        }
+
+        .status.idle {
+            background: #E8F5E9;
+            color: #388E3C;
+        }
+
+        .status.error {
+            background: #FFEBEE;
+            color: #C62828;
+        }
+
+        .info {
+            margin-top: 20px;
+            padding: 12px;
+            background: #FFF9C4;
+            border-left: 4px solid #FBC02D;
+            border-radius: 4px;
+            font-size: 14px;
+            color: #555;
+        }
+
+        .keyboard-hint {
+            margin-top: 10px;
+            padding: 8px;
+            background: #E3F2FD;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #1565C0;
+        }
+
+        kbd {
+            display: inline-block;
+            padding: 2px 6px;
+            background: #fff;
+            border: 1px solid #ccc;
+            border-radius: 3px;
+            font-family: monospace;
+            font-size: 12px;
+        }
+
+        .button-bar {
+            display: flex;
+            gap: 10px;
+            margin-top: 10px;
+            flex-wrap: wrap;
+        }
+
+        .action-btn {
+            flex: 1;
+            min-width: 140px;
+            padding: 12px 20px;
+            font-size: 16px;
+            font-weight: 600;
+            border: 2px solid #ddd;
+            border-radius: 6px;
+            background: white;
+            color: #333;
+            cursor: pointer;
+            transition: all 0.2s;
+            touch-action: manipulation;
+            -webkit-tap-highlight-color: transparent;
+        }
+
+        .action-btn:active {
+            transform: scale(0.98);
+            background: #f0f0f0;
+        }
+
+        .action-btn:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .action-btn.primary {
+            background: #4CAF50;
+            color: white;
+            border-color: #4CAF50;
+        }
+
+        .action-btn.primary:active:not(:disabled) {
+            background: #45a049;
+        }
+
+        .action-btn.secondary {
+            background: #2196F3;
+            color: white;
+            border-color: #2196F3;
+        }
+
+        .action-btn.secondary:active:not(:disabled) {
+            background: #0b7dda;
+        }
+
+        @media (max-width: 600px) {
+            body {
+                padding: 10px;
+            }
+
+            .container {
+                padding: 15px;
+            }
+
+            h1 {
+                font-size: 24px;
+            }
+
+            .action-btn {
+                min-width: 120px;
+                padding: 14px 18px;
+                font-size: 15px;
+            }
+
+            .keyboard-hint {
+                font-size: 12px;
+            }
+
+            #inputText, #backdrop {
+                font-size: 16px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <h1>ONNX Text Autocomplete Demo</h1>
+
+    <div class="container">
+        <label for="inputText">Type your text (autocomplete triggers on space or after 300ms pause):</label>
+
+        <div class="editor-wrapper">
+            <div id="backdrop"></div>
+            <textarea id="inputText" placeholder="Once upon a time..." spellcheck="false"></textarea>
+        </div>
+
+        <div class="keyboard-hint">
+            Press <kbd>→</kbd> (Right Arrow) to accept the next word • Press <kbd>Tab</kbd> to accept all suggestions
+        </div>
+
+        <div class="button-bar">
+            <button id="nextWordBtn" class="action-btn primary" disabled>→ Next Word</button>
+            <button id="acceptAllBtn" class="action-btn secondary" disabled>⇥ Accept All</button>
+        </div>
+
+        <div id="status" class="status idle">Ready</div>
+    </div>
+
+    <div class="info">
+        <strong>How it works:</strong> As you type, the system will automatically generate text completions shown in gray.
+        Generation triggers when you press space or pause for 300ms. Use the right arrow key to accept suggestions word by word, or Tab to accept everything.
+    </div>
+
+    <script>
+        const inputText = document.getElementById('inputText');
+        const backdrop = document.getElementById('backdrop');
+        const status = document.getElementById('status');
+        const nextWordBtn = document.getElementById('nextWordBtn');
+        const acceptAllBtn = document.getElementById('acceptAllBtn');
+
+        let debounceTimer = null;
+        let currentController = null;
+        let currentGenerationId = 0;
+        let suggestionText = '';
+        const DEBOUNCE_DELAY = 300;
+        // Auto-detect API URL based on current page location
+        const API_URL = `${window.location.protocol}//${window.location.host}/generate`;
+
+        function setStatus(message, type) {
+            status.textContent = message;
+            status.className = `status ${type}`;
+        }
+
+        function updateBackdrop() {
+            const userText = inputText.value;
+            backdrop.innerHTML = escapeHtml(userText) + '<span class="suggestion">' + escapeHtml(suggestionText) + '</span>';
+            updateButtonStates();
+        }
+
+        function updateButtonStates() {
+            const hasSuggestion = suggestionText.trim().length > 0;
+            nextWordBtn.disabled = !hasSuggestion;
+            acceptAllBtn.disabled = !hasSuggestion;
+        }
+
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+
+        function acceptNextWord() {
+            if (!suggestionText) {
+                console.log('No suggestion text available');
+                return;
+            }
+
+            // Match leading whitespace + next word + optional trailing space
+            // This handles: " word ", " word", "word ", "word"
+            const match = suggestionText.match(/^(\s*)(\S+)(\s?)/);
+            if (match) {
+                const leadingSpace = match[1];
+                const word = match[2];
+                const trailingSpace = match[3];
+                const fullMatch = leadingSpace + word + trailingSpace;
+
+                console.log('Accepting:', JSON.stringify(fullMatch));
+                inputText.value += fullMatch;
+                suggestionText = suggestionText.substring(fullMatch.length);
+
+                // If no more suggestions, clear
+                if (!suggestionText.trim()) {
+                    suggestionText = '';
+                }
+
+                updateBackdrop();
+
+                // Move cursor to end
+                inputText.focus();
+            } else {
+                console.log('No word match found in:', JSON.stringify(suggestionText));
+            }
+        }
+
+        function acceptAllSuggestions() {
+            if (!suggestionText) return;
+            inputText.value += suggestionText;
+            suggestionText = '';
+            updateBackdrop();
+        }
+
+        async function generateText(prompt) {
+            // Cancel previous request
+            if (currentController) {
+                currentController.abort();
+            }
+
+            // Create new generation ID
+            currentGenerationId++;
+            const thisGenerationId = currentGenerationId;
+
+            // Create new abort controller
+            currentController = new AbortController();
+            const controller = currentController;
+
+            // Clear suggestion
+            suggestionText = '';
+            updateBackdrop();
+            setStatus('Generating...', 'generating');
+
+            try {
+                const response = await fetch(API_URL, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify({ prompt }),
+                    signal: controller.signal
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+
+                while (true) {
+                    const { value, done } = await reader.read();
+
+                    if (done) {
+                        // Only update status if this is still the current generation
+                        if (thisGenerationId === currentGenerationId) {
+                            setStatus('Complete', 'idle');
+                        }
+                        break;
+                    }
+
+                    // Decode the chunk
+                    const chunk = decoder.decode(value, { stream: true });
+
+                    // Parse SSE format (data: <token>\n\n)
+                    const lines = chunk.split('\n');
+                    for (const line of lines) {
+                        if (line.startsWith('data: ')) {
+                            const token = line.substring(6);
+                            if (token.startsWith('ERROR:')) {
+                                if (thisGenerationId === currentGenerationId) {
+                                    setStatus(token, 'error');
+                                }
+                                return;
+                            }
+                            // Only append if this is still the current generation
+                            if (thisGenerationId === currentGenerationId) {
+                                suggestionText += token;
+                                updateBackdrop();
+                            }
+                        }
+                    }
+                }
+
+            } catch (error) {
+                if (error.name === 'AbortError') {
+                    // Only update status if this is still the current generation
+                    if (thisGenerationId === currentGenerationId) {
+                        setStatus('Cancelled', 'idle');
+                    }
+                } else {
+                    console.error('Generation error:', error);
+                    if (thisGenerationId === currentGenerationId) {
+                        setStatus(`Error: ${error.message}`, 'error');
+                    }
+                }
+            } finally {
+                // Only clear if this is still the current controller
+                if (currentController === controller) {
+                    currentController = null;
+                }
+            }
+        }
+
+        function triggerGeneration() {
+            const prompt = inputText.value.trim();
+
+            if (prompt.length === 0) {
+                suggestionText = '';
+                updateBackdrop();
+                setStatus('Ready', 'idle');
+                return;
+            }
+
+            generateText(prompt);
+        }
+
+        // Handle keyboard events
+        inputText.addEventListener('keydown', (e) => {
+            // Right arrow key - accept next word
+            if (e.key === 'ArrowRight') {
+                const cursorPos = inputText.selectionStart;
+                const textLength = inputText.value.length;
+                console.log('Right arrow pressed. Cursor:', cursorPos, 'Length:', textLength, 'Has suggestion:', !!suggestionText);
+
+                if (suggestionText && cursorPos === textLength) {
+                    e.preventDefault();
+                    acceptNextWord();
+                    // Ensure cursor stays at the end
+                    setTimeout(() => {
+                        inputText.selectionStart = inputText.value.length;
+                        inputText.selectionEnd = inputText.value.length;
+                    }, 0);
+                    return;
+                }
+            }
+
+            // Tab key - accept all suggestions
+            if (e.key === 'Tab') {
+                if (suggestionText) {
+                    e.preventDefault();
+                    acceptAllSuggestions();
+                    // Ensure cursor stays at the end
+                    setTimeout(() => {
+                        inputText.selectionStart = inputText.value.length;
+                        inputText.selectionEnd = inputText.value.length;
+                    }, 0);
+                    return;
+                }
+            }
+        });
+
+        // Handle input events
+        inputText.addEventListener('input', (e) => {
+            // Clear suggestions when user types
+            suggestionText = '';
+            updateBackdrop();
+
+            // Clear debounce timer
+            if (debounceTimer) {
+                clearTimeout(debounceTimer);
+            }
+
+            // Check if space was just typed
+            const lastChar = e.data;
+            if (lastChar === ' ') {
+                triggerGeneration();
+            } else {
+                // Set debounce timer for other characters
+                debounceTimer = setTimeout(() => {
+                    triggerGeneration();
+                }, DEBOUNCE_DELAY);
+            }
+        });
+
+        // Handle paste events
+        inputText.addEventListener('paste', () => {
+            suggestionText = '';
+            setTimeout(() => {
+                updateBackdrop();
+                triggerGeneration();
+            }, 100);
+        });
+
+        // Sync scroll between textarea and backdrop
+        inputText.addEventListener('scroll', () => {
+            backdrop.scrollTop = inputText.scrollTop;
+            backdrop.scrollLeft = inputText.scrollLeft;
+        });
+
+        // Handle button clicks
+        nextWordBtn.addEventListener('click', () => {
+            if (!nextWordBtn.disabled) {
+                acceptNextWord();
+                inputText.focus();
+            }
+        });
+
+        acceptAllBtn.addEventListener('click', () => {
+            if (!acceptAllBtn.disabled) {
+                acceptAllSuggestions();
+                inputText.focus();
+            }
+        });
+
+        // Initial status
+        setStatus('Ready', 'idle');
+        updateBackdrop();
+    </script>
+</body>
+</html>
