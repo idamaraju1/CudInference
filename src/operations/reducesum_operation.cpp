@@ -1,14 +1,24 @@
-void GpuExecutor::executeReduceSum(const Node& node) {
+#include "reducesum_operation.hpp"
+#include "operation_registry.hpp"
+#include "operation_utils.hpp"
+#include "../executors/gpu/kernels/gpu_kernels.cuh"
+#include <numeric>
+
+namespace onnx_runner {
+
+using namespace operation_utils;
+
+void ReduceSumOperation::execute(const Node& node, ExecutionContext& ctx) {
     if (node.inputs().empty() || node.inputs().size() > 2 || node.outputs().size() != 1) {
         throw std::runtime_error("ReduceSum expects 1 or 2 inputs and 1 output");
     }
 
-    auto input = getTensor(node.inputs()[0]);
+    auto input = getTensor(node.inputs()[0], ctx);
 
     // Determine axes
     std::vector<int64_t> axes = node.getIntsAttr("axes");
     if (axes.empty() && node.inputs().size() >= 2) {
-        auto axes_tensor = getTensor(node.inputs()[1]);
+        auto axes_tensor = getTensor(node.inputs()[1], ctx);
         if (axes_tensor->device() == DeviceType::CUDA) {
             axes_tensor->toCPU();
         }
@@ -60,7 +70,7 @@ void GpuExecutor::executeReduceSum(const Node& node) {
         output_shape.push_back(1);
     }
 
-    auto output = allocateOutput(output_shape);
+    auto output = allocateOutput(output_shape, ctx);
 
     // Currently only support FLOAT32 for GPU path
     if (input->dtype() != DataType::FLOAT32) {
@@ -102,7 +112,7 @@ void GpuExecutor::executeReduceSum(const Node& node) {
         }
 
         size_t bytes = output_size * sizeof(float);
-        if (use_cpu_fallback_) {
+        if (ctx.use_cpu) {
             std::memcpy(output->data<float>(), host_output.data(), bytes);
         } else {
             CUDA_CHECK(cudaMemcpy(output->data<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
@@ -113,7 +123,7 @@ void GpuExecutor::executeReduceSum(const Node& node) {
         std::vector<uint8_t> cache;
         bool need_free = false;
 
-        if (use_cpu_fallback_) {
+        if (ctx.use_cpu) {
             input_ptr = getHostData<float>(input, cache);
         } else {
             if (input->device() == DeviceType::CUDA) {
@@ -136,14 +146,19 @@ void GpuExecutor::executeReduceSum(const Node& node) {
             output_shape,
             reduce_mask,
             keepdims,
-            use_cpu_fallback_,
-            num_cpu_threads_
+            ctx.use_cpu,
+            ctx.num_cpu_threads
         );
 
-        if (!use_cpu_fallback_ && need_free) {
+        if (!ctx.use_cpu && need_free) {
             CUDA_CHECK(cudaFree(const_cast<float*>(input_ptr)));
         }
     }
 
-    tensors_[node.outputs()[0]] = output;
+    storeOutput(node.outputs()[0], output, ctx);
 }
+
+// Register the operation
+REGISTER_OPERATION(OpType::REDUCESUM, ReduceSumOperation)
+
+} // namespace onnx_runner

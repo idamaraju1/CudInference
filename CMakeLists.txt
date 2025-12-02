@@ -53,6 +53,26 @@ set(EXECUTOR_SOURCES
     src/executors/autoregressive_generator.cpp
 )
 
+set(OPERATION_SOURCES
+    src/operations/add_operation.cpp
+    src/operations/relu_operation.cpp
+    src/operations/sub_operation.cpp
+    src/operations/sigmoid_operation.cpp
+    src/operations/mul_operation.cpp
+    src/operations/shape_operation.cpp
+    src/operations/transpose_operation.cpp
+    src/operations/cast_operation.cpp
+    src/operations/reducesum_operation.cpp
+    src/operations/gemm_operation.cpp
+    src/operations/gather_operation.cpp
+    src/operations/matmul_operation.cpp
+    src/operations/simplified_layernorm_operation.cpp
+    src/operations/skip_simplified_layernorm_operation.cpp
+    src/operations/rotary_embedding_operation.cpp
+    src/operations/group_query_attention_operation.cpp
+    src/operations/operation_utils.cpp
+)
+
 set(CPU_KERNEL_SOURCES
     src/executors/cpu/kernels/add.cpp
     src/executors/cpu/kernels/relu.cpp
@@ -85,6 +105,7 @@ add_executable(onnx_gpu_engine
     ${CORE_SOURCES}
     ${UTILS_SOURCES}
     ${EXECUTOR_SOURCES}
+    ${OPERATION_SOURCES}
     ${CPU_KERNEL_SOURCES}
     ${CUDA_SOURCES}
 )

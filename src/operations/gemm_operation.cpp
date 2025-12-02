@@ -1,12 +1,22 @@
-void GpuExecutor::executeGemm(const Node& node) {
+#include "gemm_operation.hpp"
+#include "operation_registry.hpp"
+#include "operation_utils.hpp"
+#include "../executors/gpu/kernels/gpu_kernels.cuh"
+#include "../executors/cpu/kernels/cpu_kernels.h"
+
+namespace onnx_runner {
+
+using namespace operation_utils;
+
+void GemmOperation::execute(const Node& node, ExecutionContext& ctx) {
     // GEMM: Y = alpha * A @ B + beta * C
     // Simplified: Y = A @ B + C (assuming alpha=1, beta=1)
     if (node.inputs().size() < 2 || node.outputs().size() != 1) {
         throw std::runtime_error("Gemm expects at least 2 inputs and 1 output");
     }
 
-    auto A = getTensor(node.inputs()[0]);
-    auto B = getTensor(node.inputs()[1]);
+    auto A = getTensor(node.inputs()[0], ctx);
+    auto B = getTensor(node.inputs()[1], ctx);
 
     // Check for transpose attributes
     bool transA = node.getIntAttr("transA", 0) != 0;
@@ -14,7 +24,7 @@ void GpuExecutor::executeGemm(const Node& node) {
     float alpha = node.getFloatAttr("alpha", 1.0f);
     float beta = node.getFloatAttr("beta", 1.0f);
 
-    LOG_DEBUG("  Gemm: A", A->shapeStr(), " B", B->shapeStr(),
+    logDebug(ctx, "  Gemm: A", A->shapeStr(), " B", B->shapeStr(),
              " transA=", transA, " transB=", transB);
 
     // Only support alpha=1, beta=1 for now
@@ -23,14 +33,12 @@ void GpuExecutor::executeGemm(const Node& node) {
     }
 
     // Determine dimensions based on transpose flags
-    // Gemm: Y = alpha * op(A) @ op(B) + beta * C
-    // where op(X) = X if trans=0, X^T if trans=1
     int64_t M = transA ? A->dim(1) : A->dim(0);
     int64_t K = transA ? A->dim(0) : A->dim(1);
     int64_t K_B = transB ? B->dim(1) : B->dim(0);
     int64_t N = transB ? B->dim(0) : B->dim(1);
 
-    LOG_DEBUG("  Result dimensions: M=", M, " K=", K, " N=", N);
+    logDebug(ctx, "  Result dimensions: M=", M, " K=", K, " N=", N);
 
     if (K != K_B) {
         throw std::runtime_error("Gemm dimension mismatch: K dimensions don't match");
@@ -41,10 +49,8 @@ void GpuExecutor::executeGemm(const Node& node) {
     std::shared_ptr<Tensor> B_op = B;
 
     if (transA) {
-        // Create temporary CPU tensor for transpose
         auto A_temp = std::make_shared<Tensor>(A->shape());
         if (A->device() == DeviceType::CUDA) {
-            // Copy from GPU to CPU
             CUDA_CHECK(cudaMemcpy(A_temp->data<float>(), A->data<float>(),
                                  A->size() * sizeof(float), cudaMemcpyDeviceToHost));
         } else {
@@ -52,15 +58,13 @@ void GpuExecutor::executeGemm(const Node& node) {
         }
 
         A_op = std::make_shared<Tensor>(std::vector<int64_t>{M, K});
-        transposeMatrix(A_temp->data<float>(), A_op->data<float>(), A->dim(0), A->dim(1), use_cpu_fallback_);
-        if (!use_cpu_fallback_) A_op->toGPU();
+        transposeMatrix(A_temp->data<float>(), A_op->data<float>(), A->dim(0), A->dim(1));
+        if (!ctx.use_cpu) A_op->toGPU();
     }
 
     if (transB) {
-        // Create temporary CPU tensor for transpose
         auto B_temp = std::make_shared<Tensor>(B->shape());
         if (B->device() == DeviceType::CUDA) {
-            // Copy from GPU to CPU
             CUDA_CHECK(cudaMemcpy(B_temp->data<float>(), B->data<float>(),
                                  B->size() * sizeof(float), cudaMemcpyDeviceToHost));
         } else {
@@ -68,14 +72,14 @@ void GpuExecutor::executeGemm(const Node& node) {
         }
 
         B_op = std::make_shared<Tensor>(std::vector<int64_t>{K, N});
-        transposeMatrix(B_temp->data<float>(), B_op->data<float>(), B->dim(0), B->dim(1), use_cpu_fallback_);
-        if (!use_cpu_fallback_) B_op->toGPU();
+        transposeMatrix(B_temp->data<float>(), B_op->data<float>(), B->dim(0), B->dim(1));
+        if (!ctx.use_cpu) B_op->toGPU();
     }
 
-    auto Y = allocateOutput({M, N});
+    auto Y = allocateOutput({M, N}, ctx);
 
-    // GPU_PERSISTENT MODE: Keep everything on GPU
-    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+    // GPU_PERSISTENT MODE
+    if (ctx.gpu_mode == ExecutionContext::GPUMode::PERSISTENT) {
         A_op->ensureOnGPU();
         B_op->ensureOnGPU();
 
@@ -83,27 +87,23 @@ void GpuExecutor::executeGemm(const Node& node) {
         const float* d_B = B_op->deviceData<float>();
         float* d_Y = Y->mutableDeviceData<float>();
 
-        // TODO: Use cuBLAS with transpose flags instead of pre-transposing
-        // For now, assume A_op and B_op are already correctly oriented
         kernels::launchMatMul(d_A, d_B, d_Y, M, K, N);
 
-        // Add bias if present
         if (node.inputs().size() >= 3) {
-            auto C = getTensor(node.inputs()[2]);
+            auto C = getTensor(node.inputs()[2], ctx);
             C->ensureOnGPU();
-
             const float* d_C = C->deviceData<float>();
             kernels::launchAdd(d_Y, d_C, d_Y, Y->size());
         }
 
-        tensors_[node.outputs()[0]] = Y;
+        storeOutput(node.outputs()[0], Y, ctx);
         return;
     }
 
-    if (use_cpu_fallback_) {
-        if (num_cpu_threads_ > 1) {
+    if (ctx.use_cpu) {
+        if (ctx.num_cpu_threads > 1) {
             kernels::matmulCPUMultiThreaded(A_op->data<float>(), B_op->data<float>(), Y->data<float>(),
-                                           M, K, N, num_cpu_threads_);
+                                           M, K, N, ctx.num_cpu_threads);
         } else {
             kernels::matmulCPU(A_op->data<float>(), B_op->data<float>(), Y->data<float>(),
                               M, K, N);
@@ -114,22 +114,35 @@ void GpuExecutor::executeGemm(const Node& node) {
         CUDA_CHECK(cudaDeviceSynchronize());
     }
 
-    // Add bias if present
+    // Add bias if present (broadcast across rows)
     if (node.inputs().size() >= 3) {
-        auto C = getTensor(node.inputs()[2]);
-        int size = Y->size();
+        auto C = getTensor(node.inputs()[2], ctx);
 
-        if (use_cpu_fallback_) {
-            if (num_cpu_threads_ > 1) {
-                kernels::addCPUMultiThreaded(Y->data<float>(), C->data<float>(), Y->data<float>(), size, num_cpu_threads_);
-            } else {
-                kernels::addCPU(Y->data<float>(), C->data<float>(), Y->data<float>(), size);
+        // Bias C has shape [N], Y has shape [M, N]
+        // We need to broadcast C across each row of Y
+        const float* bias = C->data<float>();
+        float* y_data = Y->data<float>();
+
+        if (ctx.use_cpu) {
+            // CPU: Add bias to each row
+            for (int64_t i = 0; i < M; ++i) {
+                for (int64_t j = 0; j < N; ++j) {
+                    y_data[i * N + j] += bias[j];
+                }
             }
         } else {
-            kernels::launchAdd(Y->data<float>(), C->data<float>(), Y->data<float>(), size);
+            // GPU: Add bias to each row
+            for (int64_t i = 0; i < M; ++i) {
+                kernels::launchAdd(y_data + i * N, bias, y_data + i * N, N);
+            }
             CUDA_CHECK(cudaDeviceSynchronize());
         }
     }
 
-    tensors_[node.outputs()[0]] = Y;
+    storeOutput(node.outputs()[0], Y, ctx);
 }
+
+// Register the operation
+REGISTER_OPERATION(OpType::GEMM, GemmOperation)
+
+} // namespace onnx_runner

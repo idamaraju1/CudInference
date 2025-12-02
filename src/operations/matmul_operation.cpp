@@ -1,11 +1,19 @@
-void GpuExecutor::executeMatMul(const Node& node) {
-    // MatMul: Y = A @ B
-    if (node.inputs().size() != 2 || node.outputs().size() != 1) {
-        throw std::runtime_error("MatMul expects 2 inputs and 1 output");
-    }
+#include "matmul_operation.hpp"
+#include "operation_registry.hpp"
+#include "operation_utils.hpp"
+#include "../executors/gpu/kernels/gpu_kernels.cuh"
+#include "../executors/cpu/kernels/cpu_kernels.h"
 
-    auto A = getTensor(node.inputs()[0]);
-    auto B = getTensor(node.inputs()[1]);
+namespace onnx_runner {
+
+using namespace operation_utils;
+
+void MatMulOperation::execute(const Node& node, ExecutionContext& ctx) {
+    // MatMul: Y = A @ B
+    validateInputOutputCount(node, 2, 1);
+
+    auto A = getTensor(node.inputs()[0], ctx);
+    auto B = getTensor(node.inputs()[1], ctx);
 
     // Fast path: strictly 2D matrices
     if (A->ndim() == 2 && B->ndim() == 2) {
@@ -20,11 +28,11 @@ void GpuExecutor::executeMatMul(const Node& node) {
                                    std::to_string(K2) + "," + std::to_string(N) + ")");
         }
 
-        auto Y = allocateOutput({M, N});
-        LOG_DEBUG("  MatMul: (", M, ", ", K, ") @ (", K, ", ", N, ") -> (", M, ", ", N, ")");
+        auto Y = allocateOutput({M, N}, ctx);
+        logDebug(ctx, "  MatMul: (", M, ", ", K, ") @ (", K, ", ", N, ") -> (", M, ", ", N, ")");
 
-        // GPU_PERSISTENT MODE: Direct GPU execution
-        if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+        // GPU_PERSISTENT MODE
+        if (ctx.gpu_mode == ExecutionContext::GPUMode::PERSISTENT) {
             A->ensureOnGPU();
             B->ensureOnGPU();
 
@@ -34,14 +42,14 @@ void GpuExecutor::executeMatMul(const Node& node) {
 
             kernels::launchMatMul(d_A, d_B, d_Y, M, K, N);
 
-            tensors_[node.outputs()[0]] = Y;
+            storeOutput(node.outputs()[0], Y, ctx);
             return;
         }
 
-        if (use_cpu_fallback_) {
-            if (num_cpu_threads_ > 1) {
+        if (ctx.use_cpu) {
+            if (ctx.num_cpu_threads > 1) {
                 kernels::matmulCPUMultiThreaded(A->data<float>(), B->data<float>(), Y->data<float>(),
-                                               M, K, N, num_cpu_threads_);
+                                               M, K, N, ctx.num_cpu_threads);
             } else {
                 kernels::matmulCPU(A->data<float>(), B->data<float>(), Y->data<float>(),
                                   M, K, N);
@@ -52,10 +60,11 @@ void GpuExecutor::executeMatMul(const Node& node) {
             CUDA_CHECK(cudaDeviceSynchronize());
         }
 
-        tensors_[node.outputs()[0]] = Y;
+        storeOutput(node.outputs()[0], Y, ctx);
         return;
     }
 
+    // Batched MatMul path
     if (A->ndim() < 2 || B->ndim() < 2) {
         throw std::runtime_error("MatMul requires both inputs to have rank >= 2");
     }
@@ -83,7 +92,7 @@ void GpuExecutor::executeMatMul(const Node& node) {
     std::vector<int64_t> output_shape = batch_shape;
     output_shape.push_back(M);
     output_shape.push_back(N);
-    auto Y = allocateOutput(output_shape);
+    auto Y = allocateOutput(output_shape, ctx);
 
     std::vector<int64_t> target_shape_A = batch_shape;
     target_shape_A.push_back(M);
@@ -95,16 +104,15 @@ void GpuExecutor::executeMatMul(const Node& node) {
 
     size_t batch_count = computeSizeFromShape(batch_shape);
     if (batch_count == 0) {
-        tensors_[node.outputs()[0]] = Y;
+        storeOutput(node.outputs()[0], Y, ctx);
         return;
     }
 
     // GPU_PERSISTENT MODE: Batched matmul on GPU
-    if (exec_mode_ == ExecutionMode::GPU_PERSISTENT) {
+    if (ctx.gpu_mode == ExecutionContext::GPUMode::PERSISTENT) {
         A->ensureOnGPU();
         B->ensureOnGPU();
 
-        // For now, use simple loop over batches (TODO: use cuBLAS batched API)
         const float* d_A = A->deviceData<float>();
         const float* d_B = B->deviceData<float>();
         float* d_Y = Y->mutableDeviceData<float>();
@@ -114,7 +122,6 @@ void GpuExecutor::executeMatMul(const Node& node) {
         size_t matrixY_size = static_cast<size_t>(M) * static_cast<size_t>(N);
 
         // TODO: Handle broadcasting on GPU
-        // For now, assume shapes are already compatible (most common case)
         for (size_t batch = 0; batch < batch_count; ++batch) {
             const float* A_ptr = d_A + batch * matrixA_size;
             const float* B_ptr = d_B + batch * matrixB_size;
@@ -123,11 +130,11 @@ void GpuExecutor::executeMatMul(const Node& node) {
             kernels::launchMatMul(A_ptr, B_ptr, Y_ptr, M, K, N);
         }
 
-        tensors_[node.outputs()[0]] = Y;
+        storeOutput(node.outputs()[0], Y, ctx);
         return;
     }
 
-    // CPU_ONLY and GPU_COPY modes (legacy)
+    // CPU_ONLY and GPU_COPY modes
     std::vector<uint8_t> cacheA;
     std::vector<uint8_t> cacheB;
     const float* hostA = getHostData<float>(A, cacheA);
@@ -163,19 +170,24 @@ void GpuExecutor::executeMatMul(const Node& node) {
         const float* B_ptr = expandedB + batch * matrixB_size;
         float* Y_ptr = output_ptr + batch * matrixY_size;
 
-        if (num_cpu_threads_ > 1) {
-            kernels::matmulCPUMultiThreaded(A_ptr, B_ptr, Y_ptr, M, K, N, num_cpu_threads_);
+        if (ctx.num_cpu_threads > 1) {
+            kernels::matmulCPUMultiThreaded(A_ptr, B_ptr, Y_ptr, M, K, N, ctx.num_cpu_threads);
         } else {
             kernels::matmulCPU(A_ptr, B_ptr, Y_ptr, M, K, N);
         }
     }
 
     size_t bytes = host_output.size() * sizeof(float);
-    if (use_cpu_fallback_) {
+    if (ctx.use_cpu) {
         std::memcpy(Y->data<float>(), host_output.data(), bytes);
     } else {
         CUDA_CHECK(cudaMemcpy(Y->data<float>(), host_output.data(), bytes, cudaMemcpyHostToDevice));
     }
 
-    tensors_[node.outputs()[0]] = Y;
+    storeOutput(node.outputs()[0], Y, ctx);
 }
+
+// Register the operation
+REGISTER_OPERATION(OpType::MATMUL, MatMulOperation)
+
+} // namespace onnx_runner

@@ -1,9 +1,15 @@
-void GpuExecutor::executeCast(const Node& node) {
-    if (node.inputs().size() != 1 || node.outputs().size() != 1) {
-        throw std::runtime_error("Cast expects 1 input and 1 output");
-    }
+#include "cast_operation.hpp"
+#include "operation_registry.hpp"
+#include "operation_utils.hpp"
 
-    auto input = getTensor(node.inputs()[0]);
+namespace onnx_runner {
+
+using namespace operation_utils;
+
+void CastOperation::execute(const Node& node, ExecutionContext& ctx) {
+    validateInputOutputCount(node, 1, 1);
+
+    auto input = getTensor(node.inputs()[0], ctx);
 
     int64_t to_attr = node.getIntAttr("to", -1);
     if (to_attr == -1) {
@@ -48,9 +54,14 @@ void GpuExecutor::executeCast(const Node& node) {
                                      dataTypeToString(input->dtype()));
     }
 
-    if (!use_cpu_fallback_) {
+    if (!ctx.use_cpu) {
         output->toGPU();
     }
 
-    tensors_[node.outputs()[0]] = output;
+    storeOutput(node.outputs()[0], output, ctx);
 }
+
+// Register the operation
+REGISTER_OPERATION(OpType::CAST, CastOperation)
+
+} // namespace onnx_runner

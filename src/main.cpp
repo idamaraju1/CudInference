@@ -562,7 +562,7 @@ int main(int argc, char** argv) {
         // Step 5: Display outputs
         LOG_INFO("\n=== Outputs ===");
         for (const auto& [name, tensor] : outputs) {
-            printTensorSample("Output " + name, *tensor);
+            printTensorSample("Output " + name, *tensor, 100);  // Print up to 100 values for testing
         }
 
         // Try to decode output if it looks like token IDs or logits

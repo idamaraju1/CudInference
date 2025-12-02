@@ -1,6 +1,23 @@
 #include "gpu_executor.hpp"
 #include "gpu/kernels/gpu_kernels.cuh"
 #include "../utils/logger.hpp"
+#include "../operations/operation_registry.hpp"
+#include "../operations/add_operation.hpp"
+#include "../operations/relu_operation.hpp"
+#include "../operations/sub_operation.hpp"
+#include "../operations/sigmoid_operation.hpp"
+#include "../operations/mul_operation.hpp"
+#include "../operations/shape_operation.hpp"
+#include "../operations/transpose_operation.hpp"
+#include "../operations/cast_operation.hpp"
+#include "../operations/reducesum_operation.hpp"
+#include "../operations/gemm_operation.hpp"
+#include "../operations/gather_operation.hpp"
+#include "../operations/matmul_operation.hpp"
+#include "../operations/simplified_layernorm_operation.hpp"
+#include "../operations/skip_simplified_layernorm_operation.hpp"
+#include "../operations/rotary_embedding_operation.hpp"
+#include "../operations/group_query_attention_operation.hpp"
 #include <cuda_fp16.h>
 #include <stdexcept>
 #include <cstring>
@@ -534,77 +551,37 @@ GpuExecutor::execute(const Graph& graph,
 }
 
 void GpuExecutor::executeNode(const Node& node) {
-    switch (node.opType()) {
-        case OpType::MATMUL:
-            executeMatMul(node);
-            break;
-        case OpType::GEMM:
-            executeGemm(node);
-            break;
-        case OpType::ADD:
-            executeAdd(node);
-            break;
-        case OpType::SUB:
-            executeSub(node);
-            break;
-        case OpType::MUL:
-            executeMul(node);
-            break;
-        case OpType::RELU:
-            executeReLU(node);
-            break;
-        case OpType::GATHER:
-            executeGather(node);
-            break;
-        case OpType::TRANSPOSE:
-            executeTranspose(node);
-            break;
-        case OpType::SHAPE:
-            executeShape(node);
-            break;
-        case OpType::CAST:
-            executeCast(node);
-            break;
-        case OpType::SIGMOID:
-            executeSigmoid(node);
-            break;
-        case OpType::REDUCESUM:
-            executeReduceSum(node);
-            break;
-        case OpType::SIMPLIFIEDLAYERNORM:
-            executeSimplifiedLayerNormalization(node);
-            break;
-        case OpType::SKIPSIMPLIFIEDLAYERNORM:
-            executeSkipSimplifiedLayerNormalization(node);
-            break;
-        case OpType::ROTARYEMBEDDING:
-            executeRotaryEmbedding(node);
-            break;
-        case OpType::GROUPQUERYATTENTION:
-            executeGroupQueryAttention(node);
-            break;
-        default:
-            throw std::runtime_error("Unsupported operation: " +
-                                   opTypeToString(node.opType()));
+    // Determine GPU mode for ExecutionContext
+    ExecutionContext::GPUMode gpu_mode;
+    if (use_cpu_fallback_) {
+        gpu_mode = ExecutionContext::GPUMode::NONE;
+    } else {
+        gpu_mode = (exec_mode_ == ExecutionMode::GPU_PERSISTENT)
+            ? ExecutionContext::GPUMode::PERSISTENT
+            : ExecutionContext::GPUMode::COPY;
     }
+
+    // Create execution context
+    ExecutionContext ctx(
+        tensors_,
+        use_cpu_fallback_,
+        num_cpu_threads_,
+        verbose_,
+        gpu_mode
+    );
+
+    // Use operation registry for all operations
+    auto& registry = OperationRegistry::getInstance();
+    if (!registry.hasOperation(node.opType())) {
+        throw std::runtime_error("Unsupported operation: " +
+                               opTypeToString(node.opType()));
+    }
+
+    auto op = registry.getOperation(node.opType());
+    op->execute(node, ctx);
 }
 
-#include "gpu/ops/executeMatMul.inl"
-#include "gpu/ops/executeReLU.inl"
-#include "gpu/ops/executeAdd.inl"
-#include "gpu/ops/executeSub.inl"
-#include "gpu/ops/executeGemm.inl"
-#include "gpu/ops/executeGather.inl"
-#include "gpu/ops/executeMul.inl"
-#include "gpu/ops/executeTranspose.inl"
-#include "gpu/ops/executeShape.inl"
-#include "gpu/ops/executeCast.inl"
-#include "gpu/ops/executeSigmoid.inl"
-#include "gpu/ops/executeReduceSum.inl"
-#include "gpu/ops/executeSimplifiedLayerNormalization.inl"
-#include "gpu/ops/executeSkipSimplifiedLayerNormalization.inl"
-#include "gpu/ops/executeRotaryEmbedding.inl"
-#include "gpu/ops/executeGroupQueryAttention.inl"
+// All operations now use the operation registry system
 
 std::shared_ptr<Tensor> GpuExecutor::getTensor(const std::string& name) {
     auto it = tensors_.find(name);

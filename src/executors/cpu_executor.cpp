@@ -1,6 +1,23 @@
 #include "cpu_executor.hpp"
 #include "cpu/kernels/cpu_kernels.h"
 #include "../utils/logger.hpp"
+#include "../operations/operation_registry.hpp"
+#include "../operations/add_operation.hpp"
+#include "../operations/relu_operation.hpp"
+#include "../operations/sub_operation.hpp"
+#include "../operations/sigmoid_operation.hpp"
+#include "../operations/mul_operation.hpp"
+#include "../operations/shape_operation.hpp"
+#include "../operations/transpose_operation.hpp"
+#include "../operations/cast_operation.hpp"
+#include "../operations/reducesum_operation.hpp"
+#include "../operations/gemm_operation.hpp"
+#include "../operations/gather_operation.hpp"
+#include "../operations/matmul_operation.hpp"
+#include "../operations/simplified_layernorm_operation.hpp"
+#include "../operations/skip_simplified_layernorm_operation.hpp"
+#include "../operations/rotary_embedding_operation.hpp"
+#include "../operations/group_query_attention_operation.hpp"
 #include <stdexcept>
 #include <cstring>
 #include <algorithm>
@@ -72,115 +89,27 @@ CpuExecutor::execute(const Graph& graph,
 }
 
 void CpuExecutor::executeNode(const Node& node) {
-    switch (node.opType()) {
-        case OpType::MATMUL:
-            executeMatMul(node);
-            break;
-        case OpType::GEMM:
-            executeGemm(node);
-            break;
-        case OpType::ADD:
-            executeAdd(node);
-            break;
-        case OpType::SUB:
-            executeSub(node);
-            break;
-        case OpType::MUL:
-            executeMul(node);
-            break;
-        case OpType::RELU:
-            executeReLU(node);
-            break;
-        case OpType::GATHER:
-            executeGather(node);
-            break;
-        case OpType::TRANSPOSE:
-            executeTranspose(node);
-            break;
-        case OpType::SHAPE:
-            executeShape(node);
-            break;
-        case OpType::CAST:
-            executeCast(node);
-            break;
-        case OpType::SIGMOID:
-            executeSigmoid(node);
-            break;
-        case OpType::REDUCESUM:
-            executeReduceSum(node);
-            break;
-        case OpType::SIMPLIFIEDLAYERNORM:
-            executeSimplifiedLayerNormalization(node);
-            break;
-        case OpType::SKIPSIMPLIFIEDLAYERNORM:
-            executeSkipSimplifiedLayerNormalization(node);
-            break;
-        case OpType::ROTARYEMBEDDING:
-            executeRotaryEmbedding(node);
-            break;
-        case OpType::GROUPQUERYATTENTION:
-            executeGroupQueryAttention(node);
-            break;
-        default:
-            throw std::runtime_error("Unsupported operation: " +
-                                   opTypeToString(node.opType()));
+    // Create execution context for CPU execution
+    ExecutionContext ctx(
+        tensors_,
+        true,  // use_cpu = true
+        num_cpu_threads_,
+        verbose_,
+        ExecutionContext::GPUMode::NONE
+    );
+
+    // Use operation registry for all operations
+    auto& registry = OperationRegistry::getInstance();
+    if (!registry.hasOperation(node.opType())) {
+        throw std::runtime_error("Unsupported operation: " +
+                               opTypeToString(node.opType()));
     }
+
+    auto op = registry.getOperation(node.opType());
+    op->execute(node, ctx);
 }
 
-// Include operation implementations
-#include "cpu/ops/executeMatMul.inl"
-#include "cpu/ops/executeReLU.inl"
-#include "cpu/ops/executeAdd.inl"
-#include "cpu/ops/executeSub.inl"
-
-// Placeholder implementations for operations not yet ported
-void CpuExecutor::executeGemm(const Node& node) {
-    throw std::runtime_error("Gemm not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeGather(const Node& node) {
-    throw std::runtime_error("Gather not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeMul(const Node& node) {
-    throw std::runtime_error("Mul not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeTranspose(const Node& node) {
-    throw std::runtime_error("Transpose not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeShape(const Node& node) {
-    throw std::runtime_error("Shape not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeCast(const Node& node) {
-    throw std::runtime_error("Cast not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeSigmoid(const Node& node) {
-    throw std::runtime_error("Sigmoid not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeReduceSum(const Node& node) {
-    throw std::runtime_error("ReduceSum not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeSimplifiedLayerNormalization(const Node& node) {
-    throw std::runtime_error("SimplifiedLayerNormalization not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeRotaryEmbedding(const Node& node) {
-    throw std::runtime_error("RotaryEmbedding not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeGroupQueryAttention(const Node& node) {
-    throw std::runtime_error("GroupQueryAttention not yet implemented in CPU executor");
-}
-
-void CpuExecutor::executeSkipSimplifiedLayerNormalization(const Node& node) {
-    throw std::runtime_error("SkipSimplifiedLayerNormalization not yet implemented in CPU executor");
-}
+// All operations now use the operation registry system
 
 std::shared_ptr<Tensor> CpuExecutor::getTensor(const std::string& name) {
     auto it = tensors_.find(name);
