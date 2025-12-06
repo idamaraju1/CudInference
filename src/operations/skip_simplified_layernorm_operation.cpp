@@ -60,6 +60,14 @@ void SkipSimplifiedLayerNormOperation::execute(const Node& node, ExecutionContex
     auto sum_tensor = need_sum ? allocateOutput(input->shape(), ctx) : nullptr;
     auto output_tensor = allocateOutput(input->shape(), ctx);
 
+    // Allocate GPU memory for output tensors when running on GPU
+    if (!ctx.use_cpu) {
+        output_tensor->allocateGPU();
+        if (sum_tensor) {
+            sum_tensor->allocateGPU();
+        }
+    }
+
     if (ctx.use_cpu) {
         std::vector<uint8_t> input_cache, skip_cache, gamma_cache, beta_cache;
         const float* input_data = getHostData<float>(input, input_cache);

@@ -520,17 +520,42 @@
 
         <!-- Input Section -->
         <div class="bg-slate-50 border-b border-slate-200 px-8 py-6">
-            <div class="flex flex-col gap-4 md:flex-row md:items-end md:gap-4">
-                <textarea id="jsonInput" placeholder="Paste JSON benchmark data or load a file..."
-                    class="flex-1 min-h-24 px-4 py-3 border border-slate-200 rounded-sm font-mono text-xs leading-relaxed bg-white text-slate-900 focus:outline-none focus:border-blue-500 transition-colors resize-vertical"></textarea>
-                <div class="flex flex-col gap-3 w-full md:flex-row md:w-auto">
-                    <button onclick="loadData()"
-                        class="btn-primary px-6 py-2.5 bg-white border border-blue-600 text-blue-600 rounded-sm text-xs font-medium uppercase tracking-wider hover:bg-blue-600 hover:text-white transition-all active:opacity-90 md:flex-none flex-1">Execute</button>
-                    <div class="relative w-full md:w-auto">
-                        <input type="file" id="fileInput" accept=".json" onchange="loadFile(event)" class="hidden">
-                        <label for="fileInput"
-                            class="flex items-center justify-center px-6 py-2.5 bg-white border border-green-700 text-green-700 rounded-sm text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-green-700 hover:text-white transition-all">Load
-                            JSON</label>
+            <div class="space-y-4">
+                <!-- Benchmark Results -->
+                <div>
+                    <label class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2 block">Standard Benchmark (results.json)</label>
+                    <div class="flex flex-col gap-4 md:flex-row md:items-end md:gap-4">
+                        <textarea id="jsonInput" placeholder="Paste JSON benchmark data or load a file..."
+                            class="flex-1 min-h-20 px-4 py-3 border border-slate-200 rounded-sm font-mono text-xs leading-relaxed bg-white text-slate-900 focus:outline-none focus:border-blue-500 transition-colors resize-vertical"></textarea>
+                        <div class="flex flex-col gap-3 w-full md:flex-row md:w-auto">
+                            <button onclick="loadData()"
+                                class="btn-primary px-6 py-2.5 bg-white border border-blue-600 text-blue-600 rounded-sm text-xs font-medium uppercase tracking-wider hover:bg-blue-600 hover:text-white transition-all active:opacity-90 md:flex-none flex-1">Execute</button>
+                            <div class="relative w-full md:w-auto">
+                                <input type="file" id="fileInput" accept=".json" onchange="loadFile(event)" class="hidden">
+                                <label for="fileInput"
+                                    class="flex items-center justify-center px-6 py-2.5 bg-white border border-green-700 text-green-700 rounded-sm text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-green-700 hover:text-white transition-all">Load
+                                    JSON</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Generation Benchmark Results -->
+                <div>
+                    <label class="text-xs text-slate-500 font-medium uppercase tracking-widest mb-2 block">Generation Benchmark (generation_results.json)</label>
+                    <div class="flex flex-col gap-4 md:flex-row md:items-end md:gap-4">
+                        <textarea id="genJsonInput" placeholder="Paste generation benchmark JSON or load a file..."
+                            class="flex-1 min-h-20 px-4 py-3 border border-slate-200 rounded-sm font-mono text-xs leading-relaxed bg-white text-slate-900 focus:outline-none focus:border-purple-500 transition-colors resize-vertical"></textarea>
+                        <div class="flex flex-col gap-3 w-full md:flex-row md:w-auto">
+                            <button onclick="loadGenerationData()"
+                                class="btn-primary px-6 py-2.5 bg-white border border-purple-600 text-purple-600 rounded-sm text-xs font-medium uppercase tracking-wider hover:bg-purple-600 hover:text-white transition-all active:opacity-90 md:flex-none flex-1">Load Gen Data</button>
+                            <div class="relative w-full md:w-auto">
+                                <input type="file" id="genFileInput" accept=".json" onchange="loadGenerationFile(event)" class="hidden">
+                                <label for="genFileInput"
+                                    class="flex items-center justify-center px-6 py-2.5 bg-white border border-purple-700 text-purple-700 rounded-sm text-xs font-medium uppercase tracking-wider cursor-pointer hover:bg-purple-700 hover:text-white transition-all">Load
+                                    JSON</label>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
@@ -586,11 +611,11 @@
         </div>
 
         <!-- Token Generation Performance Section -->
-        <div class="bg-white px-8 py-9 border-t border-slate-200">
+        <div id="tokenGenSection" class="bg-white px-8 py-9 border-t border-slate-200 hidden">
             <div class="max-w-5xl mx-auto bg-white border border-slate-200 rounded-sm p-7">
                 <h3
-                    class="text-xl font-semibold text-slate-900 mb-6 uppercase tracking-wide border-l-3 border-green-700 pl-3">
-                    Token Generation Performance Evolution</h3>
+                    class="text-xl font-semibold text-slate-900 mb-6 uppercase tracking-wide border-l-3 border-purple-700 pl-3">
+                    Token Generation Performance Comparison</h3>
                 <svg id="svgTokenChart" class="w-full max-w-4xl mx-auto" viewBox="0 0 1000 500"></svg>
             </div>
         </div>
@@ -648,6 +673,44 @@
                 };
                 reader.readAsText(file);
             }
+        }
+
+        function loadGenerationFile(event) {
+            const file = event.target.files[0];
+            if (file) {
+                const reader = new FileReader();
+                reader.onload = function (e) {
+                    document.getElementById('genJsonInput').value = e.target.result;
+                    loadGenerationData();
+                };
+                reader.readAsText(file);
+            }
+        }
+
+        function loadGenerationData() {
+            hideError();
+
+            const jsonText = document.getElementById('genJsonInput').value.trim();
+            if (!jsonText) {
+                showError('Please paste generation benchmark JSON data or load a file');
+                return;
+            }
+
+            let data;
+            try {
+                data = JSON.parse(jsonText);
+            } catch (e) {
+                showError('Invalid JSON: ' + e.message);
+                return;
+            }
+
+            if (!data.configurations || !Array.isArray(data.configurations)) {
+                showError('Invalid generation benchmark format: missing configurations array');
+                return;
+            }
+
+            document.getElementById('tokenGenSection').classList.remove('hidden');
+            renderTokenGenerationChartFromData(data);
         }
 
         function showError(message) {
@@ -1032,16 +1095,25 @@
             }
         }
 
-        function renderTokenGenerationChart() {
+        function renderTokenGenerationChartFromData(data) {
             const svg = document.getElementById('svgTokenChart');
             svg.innerHTML = '';
 
-            // Token generation performance data
-            const tokenData = [
-                { name: 'No KV Cache', tokensPerSec: 0.2, timeFor30: 150, color: '#b5271e', description: 'O(n²) recomputation' },
-                { name: 'With KV Cache', tokensPerSec: 0.6, timeFor30: 50, color: '#b5271e', description: 'O(n) complexity' },
-                { name: 'Full GPU', tokensPerSec: 10.6, timeFor30: 3, color: '#15803d', description: 'No CPU↔GPU transfers' }
-            ];
+            // Parse generation configurations
+            const configs = data.configurations.filter(c => c.tokens_per_sec > 0); // Only show successful runs
+            if (configs.length === 0) {
+                showError('No valid token generation data found in benchmark results');
+                return;
+            }
+
+            // Convert to chart format
+            const tokenData = configs.map(config => ({
+                name: config.name,
+                tokensPerSec: config.tokens_per_sec,
+                totalTimeMs: config.total_time_ms,
+                color: config.is_gpu ? '#15803d' : '#2563eb',
+                description: config.is_gpu ? 'GPU Accelerated' : `${config.num_threads} Thread${config.num_threads > 1 ? 's' : ''}`
+            }));
 
             const width = 1000;
             const height = 500;
@@ -1051,7 +1123,16 @@
 
             // Use tokens/sec as the primary metric
             const maxValue = Math.max(...tokenData.map(d => d.tokensPerSec));
-            const maxTick = Math.ceil(maxValue / 2) * 2; // Round up to nearest even number
+            // Better tick calculation for varying ranges
+            let tickInterval;
+            if (maxValue > 10) {
+                tickInterval = Math.ceil(maxValue / 5); // If high values, use larger ticks
+            } else if (maxValue > 5) {
+                tickInterval = 1;
+            } else {
+                tickInterval = 0.5;
+            }
+            const maxTick = Math.ceil(maxValue / tickInterval) * tickInterval;
             const scale = chartHeight / maxTick;
 
             // Draw Y-axis line
@@ -1065,9 +1146,8 @@
             svg.appendChild(yAxis);
 
             // Draw Y-axis ticks and gridlines
-            const numTicks = 6;
-            const tickInterval = maxTick / numTicks;
-            for (let i = 0; i <= numTicks; i++) {
+            const numTicksY = Math.ceil(maxTick / tickInterval);
+            for (let i = 0; i <= numTicksY; i++) {
                 const tickValue = i * tickInterval;
                 const yPos = padding.top + chartHeight - (tickValue * scale);
 
@@ -1105,10 +1185,12 @@
                 svg.appendChild(tickLabel);
             }
 
-            // Draw bars
-            const barWidth = 100;
-            const spacing = 150;
-            const totalWidth = tokenData.length * barWidth + (tokenData.length - 1) * spacing;
+            // Draw bars - adjust width/spacing based on number of configs
+            const numBars = tokenData.length;
+            const availableWidth = chartWidth - 100; // Leave some margin
+            const spacing = Math.max(20, Math.min(80, availableWidth / numBars * 0.3));
+            const barWidth = Math.max(40, Math.min(100, (availableWidth - spacing * (numBars - 1)) / numBars));
+            const totalWidth = numBars * barWidth + (numBars - 1) * spacing;
             const startX = padding.left + (chartWidth - totalWidth) / 2;
 
             tokenData.forEach((data, i) => {
@@ -1127,73 +1209,90 @@
                 bar.setAttribute('class', 'transition-all hover:opacity-80 cursor-pointer');
                 svg.appendChild(bar);
 
-                // Label (optimization name)
+                // Label (optimization name) - adjust font size based on bar width
                 const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 label.setAttribute('x', x + barWidth / 2);
                 label.setAttribute('y', padding.top + chartHeight + 25);
                 label.setAttribute('text-anchor', 'middle');
-                label.setAttribute('font-size', '17px');
+                label.setAttribute('font-size', '13px');
                 label.setAttribute('font-weight', '600');
                 label.setAttribute('fill', '#1e293b');
                 label.setAttribute('font-family', "'IBM Plex Sans', monospace");
                 label.textContent = data.name;
                 svg.appendChild(label);
 
-                // Description
-                const description = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                description.setAttribute('x', x + barWidth / 2);
-                description.setAttribute('y', padding.top + chartHeight + 42);
-                description.setAttribute('text-anchor', 'middle');
-                description.setAttribute('font-size', '13px');
-                description.setAttribute('font-weight', '400');
-                description.setAttribute('fill', '#64748b');
-                description.setAttribute('font-family', "'IBM Plex Sans', monospace");
-                description.textContent = data.description;
-                svg.appendChild(description);
+                // Description - only show if bars are wide enough
+                if (barWidth >= 60) {
+                    const description = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    description.setAttribute('x', x + barWidth / 2);
+                    description.setAttribute('y', padding.top + chartHeight + 42);
+                    description.setAttribute('text-anchor', 'middle');
+                    description.setAttribute('font-size', '13px');
+                    description.setAttribute('font-weight', '400');
+                    description.setAttribute('fill', '#64748b');
+                    description.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                    description.textContent = data.description;
+                    svg.appendChild(description);
+                }
 
-                // Tokens/sec value on top of bar
+                // Tokens/sec value on top of bar - adjust font based on bar width
                 const tokensValue = document.createElementNS('http://www.w3.org/2000/svg', 'text');
                 tokensValue.setAttribute('x', x + barWidth / 2);
-                tokensValue.setAttribute('y', y - 20);
+                tokensValue.setAttribute('y', y - (barWidth < 60 ? 8 : 20));
                 tokensValue.setAttribute('text-anchor', 'middle');
                 tokensValue.setAttribute('font-size', '20px');
                 tokensValue.setAttribute('font-weight', '700');
                 tokensValue.setAttribute('fill', data.color);
                 tokensValue.setAttribute('font-family', "'IBM Plex Sans', monospace");
-                tokensValue.textContent = `${data.tokensPerSec.toFixed(1)} tok/s`;
+                tokensValue.textContent = `${data.tokensPerSec.toFixed(2)}`;
                 svg.appendChild(tokensValue);
 
-                // Time for 30 tokens (smaller text below)
-                const timeValue = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                timeValue.setAttribute('x', x + barWidth / 2);
-                timeValue.setAttribute('y', y - 6);
-                timeValue.setAttribute('text-anchor', 'middle');
-                timeValue.setAttribute('font-size', '11px');
-                timeValue.setAttribute('font-weight', '500');
-                timeValue.setAttribute('fill', '#64748b');
-                timeValue.setAttribute('font-family', "'IBM Plex Sans', monospace");
-                timeValue.textContent = `(${data.timeFor30}s for 30 tok)`;
-                svg.appendChild(timeValue);
+                // Total time (smaller text below) - only show for wider bars
+                if (barWidth >= 60 && data.totalTimeMs !== undefined) {
+                    const timeValue = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    timeValue.setAttribute('x', x + barWidth / 2);
+                    timeValue.setAttribute('y', y - 6);
+                    timeValue.setAttribute('text-anchor', 'middle');
+                    timeValue.setAttribute('font-size', '11px');
+                    timeValue.setAttribute('font-weight', '500');
+                    timeValue.setAttribute('fill', '#64748b');
+                    timeValue.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                    timeValue.textContent = `(${(data.totalTimeMs / 1000).toFixed(1)}s)`;
+                    svg.appendChild(timeValue);
+                } else if (barWidth >= 60 && data.timeFor30 !== undefined) {
+                    const timeValue = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    timeValue.setAttribute('x', x + barWidth / 2);
+                    timeValue.setAttribute('y', y - 6);
+                    timeValue.setAttribute('text-anchor', 'middle');
+                    timeValue.setAttribute('font-size', '11px');
+                    timeValue.setAttribute('font-weight', '500');
+                    timeValue.setAttribute('fill', '#64748b');
+                    timeValue.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                    timeValue.textContent = `(${data.timeFor30}s)`;
+                    svg.appendChild(timeValue);
+                }
 
-                // Speedup indicators
-                if (i > 0) {
+                // Speedup indicators - only show significant speedups and if space permits
+                if (i > 0 && spacing > 40) {
                     const prevData = tokenData[i - 1];
                     const speedup = data.tokensPerSec / prevData.tokensPerSec;
 
-                    // Arrow and speedup text between bars
-                    const arrowX = x - spacing / 2;
-                    const arrowY = padding.top + chartHeight / 2;
+                    // Only show if speedup is significant (>1.2x or if it's the GPU jump)
+                    if (speedup > 1.2 || (data.name === 'GPU' && speedup > 1.1)) {
+                        const arrowX = x - spacing / 2;
+                        const arrowY = padding.top + chartHeight / 2;
 
-                    const speedupText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-                    speedupText.setAttribute('x', arrowX);
-                    speedupText.setAttribute('y', arrowY);
-                    speedupText.setAttribute('text-anchor', 'middle');
-                    speedupText.setAttribute('font-size', '18px');
-                    speedupText.setAttribute('font-weight', '700');
-                    speedupText.setAttribute('fill', '#15803d');
-                    speedupText.setAttribute('font-family', "'IBM Plex Sans', monospace");
-                    speedupText.textContent = `→ ${speedup.toFixed(1)}×`;
-                    svg.appendChild(speedupText);
+                        const speedupText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                        speedupText.setAttribute('x', arrowX);
+                        speedupText.setAttribute('y', arrowY);
+                        speedupText.setAttribute('text-anchor', 'middle');
+                        speedupText.setAttribute('font-size', '18px');
+                        speedupText.setAttribute('font-weight', '700');
+                        speedupText.setAttribute('fill', '#15803d');
+                        speedupText.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                        speedupText.textContent = `→ ${speedup.toFixed(1)}×`;
+                        svg.appendChild(speedupText);
+                    }
                 }
             });
 
@@ -1210,24 +1309,23 @@
             yAxisLabel.textContent = 'Tokens Per Second';
             svg.appendChild(yAxisLabel);
 
-            // Overall speedup summary
-            const overallSpeedup = tokenData[2].tokensPerSec / tokenData[0].tokensPerSec;
-            const summaryText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
-            summaryText.setAttribute('x', width / 2);
-            summaryText.setAttribute('y', padding.top + chartHeight + 85);
-            summaryText.setAttribute('text-anchor', 'middle');
-            summaryText.setAttribute('font-size', '18px');
-            summaryText.setAttribute('font-weight', '700');
-            summaryText.setAttribute('fill', '#15803d');
-            summaryText.setAttribute('font-family', "'IBM Plex Sans', monospace");
-            summaryText.textContent = `⟩ overall speedup: ${overallSpeedup.toFixed(1)}× improvement (${tokenData[0].tokensPerSec.toFixed(1)} → ${tokenData[2].tokensPerSec.toFixed(1)} tokens/sec)`;
-            svg.appendChild(summaryText);
+            // Overall speedup summary (if we have multiple configs)
+            if (tokenData.length > 1) {
+                const fastest = Math.max(...tokenData.map(d => d.tokensPerSec));
+                const slowest = Math.min(...tokenData.map(d => d.tokensPerSec));
+                const overallSpeedup = fastest / slowest;
+                const summaryText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                summaryText.setAttribute('x', width / 2);
+                summaryText.setAttribute('y', padding.top + chartHeight + 85);
+                summaryText.setAttribute('text-anchor', 'middle');
+                summaryText.setAttribute('font-size', '18px');
+                summaryText.setAttribute('font-weight', '700');
+                summaryText.setAttribute('fill', '#15803d');
+                summaryText.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                summaryText.textContent = `⟩ speedup: ${overallSpeedup.toFixed(2)}× improvement (${slowest.toFixed(2)} → ${fastest.toFixed(2)} tokens/sec)`;
+                svg.appendChild(summaryText);
+            }
         }
-
-        // Call the token generation chart rendering function on page load
-        document.addEventListener('DOMContentLoaded', function () {
-            renderTokenGenerationChart();
-        });
     </script>
 </body>
 

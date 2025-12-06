@@ -50,6 +50,7 @@ set(EXECUTOR_SOURCES
     src/executors/gpu_executor.cpp
     src/executors/cpu_executor.cpp
     src/executors/benchmark.cpp
+    src/executors/generation_benchmark.cpp
     src/executors/autoregressive_generator.cpp
 )
 

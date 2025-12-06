@@ -71,24 +71,24 @@ void skipSimplifiedLayerNormCPU(const float* X, const float* Skip, const float* 
         const float* x_row = X + m * N;
         const float* skip_row = Skip + m * N;
         float* y_row = Y + m * N;
-        float* residual_row = residual_out + m * N;
+        float* residual_row = residual_out ? (residual_out + m * N) : nullptr;
 
-        // Add residual
-        for (int n = 0; n < N; ++n) {
-            residual_row[n] = x_row[n] + skip_row[n];
-        }
-
-        // Compute mean
+        // Compute mean (need to compute residual on-the-fly if not saving)
         float mean = 0.0f;
         for (int n = 0; n < N; ++n) {
-            mean += residual_row[n];
+            float residual = x_row[n] + skip_row[n];
+            if (residual_row) {
+                residual_row[n] = residual;
+            }
+            mean += residual;
         }
         mean /= N;
 
         // Compute variance
         float variance = 0.0f;
         for (int n = 0; n < N; ++n) {
-            float diff = residual_row[n] - mean;
+            float residual = residual_row ? residual_row[n] : (x_row[n] + skip_row[n]);
+            float diff = residual - mean;
             variance += diff * diff;
         }
         variance /= N;
@@ -96,7 +96,8 @@ void skipSimplifiedLayerNormCPU(const float* X, const float* Skip, const float* 
         // Normalize and apply affine transform
         float inv_std = 1.0f / std::sqrt(variance + epsilon);
         for (int n = 0; n < N; ++n) {
-            float normalized = (residual_row[n] - mean) * inv_std;
+            float residual = residual_row ? residual_row[n] : (x_row[n] + skip_row[n]);
+            float normalized = (residual - mean) * inv_std;
             y_row[n] = normalized * (gamma ? gamma[n] : 1.0f) + (beta ? beta[n] : 0.0f);
         }
     }
@@ -109,24 +110,24 @@ void skipSimplifiedLayerNormCPUMultiThreaded(const float* X, const float* Skip, 
         const float* x_row = X + m * N;
         const float* skip_row = Skip + m * N;
         float* y_row = Y + m * N;
-        float* residual_row = residual_out + m * N;
+        float* residual_row = residual_out ? (residual_out + m * N) : nullptr;
 
-        // Add residual
-        for (int n = 0; n < N; ++n) {
-            residual_row[n] = x_row[n] + skip_row[n];
-        }
-
-        // Compute mean
+        // Compute mean (need to compute residual on-the-fly if not saving)
         float mean = 0.0f;
         for (int n = 0; n < N; ++n) {
-            mean += residual_row[n];
+            float residual = x_row[n] + skip_row[n];
+            if (residual_row) {
+                residual_row[n] = residual;
+            }
+            mean += residual;
         }
         mean /= N;
 
         // Compute variance
         float variance = 0.0f;
         for (int n = 0; n < N; ++n) {
-            float diff = residual_row[n] - mean;
+            float residual = residual_row ? residual_row[n] : (x_row[n] + skip_row[n]);
+            float diff = residual - mean;
             variance += diff * diff;
         }
         variance /= N;
@@ -134,7 +135,8 @@ void skipSimplifiedLayerNormCPUMultiThreaded(const float* X, const float* Skip, 
         // Normalize and apply affine transform
         float inv_std = 1.0f / std::sqrt(variance + epsilon);
         for (int n = 0; n < N; ++n) {
-            float normalized = (residual_row[n] - mean) * inv_std;
+            float residual = residual_row ? residual_row[n] : (x_row[n] + skip_row[n]);
+            float normalized = (residual - mean) * inv_std;
             y_row[n] = normalized * (gamma ? gamma[n] : 1.0f) + (beta ? beta[n] : 0.0f);
         }
     }

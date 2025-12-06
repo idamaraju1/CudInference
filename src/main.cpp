@@ -3,6 +3,7 @@
 #include "executors/gpu_executor.hpp"
 #include "executors/cpu_executor.hpp"
 #include "executors/benchmark.hpp"
+#include "executors/generation_benchmark.hpp"
 #include "executors/autoregressive_generator.hpp"
 #include "utils/logger.hpp"
 #include "utils/tensor.hpp"
@@ -27,6 +28,7 @@ void printUsage(const char* program_name) {
     std::cout << "  --help            Show this help message\n\n";
     std::cout << "Benchmark Mode:\n";
     std::cout << "  --benchmark       Run multi-configuration benchmark (CPU 1-N threads + GPU)\n";
+    std::cout << "  --benchmark-generation  Run generation benchmark (requires --input and --tokenizer)\n";
     std::cout << "  --cpu-threads N   Max CPU threads for benchmark mode (default: auto-detect)\n";
     std::cout << "                    Benchmark will test 1 to N threads\n";
     std::cout << "  --output FILE     Save benchmark results to JSON file (default: results.json)\n\n";
@@ -267,6 +269,7 @@ int main(int argc, char** argv) {
     bool quiet = false;
     bool debug = false;
     bool benchmark = false;
+    bool benchmark_generation = false;
     bool generate = false;
     std::string output_file;
     int cpu_threads = 0;  // Default to 0 (auto-detect hardware concurrency)
@@ -299,6 +302,8 @@ int main(int argc, char** argv) {
             debug = true;
         } else if (arg == "--benchmark") {
             benchmark = true;
+        } else if (arg == "--benchmark-generation") {
+            benchmark_generation = true;
         } else if (arg == "--output") {
             if (i + 1 < argc) {
                 output_file = argv[++i];
@@ -390,7 +395,39 @@ int main(int argc, char** argv) {
         // Step 2: Print graph summary
         graph->printSummary();
 
-        // Step 2.5: Handle autoregressive generation mode
+        // Step 2.5: Handle generation benchmark mode
+        if (benchmark_generation) {
+            if (user_input_text.empty()) {
+                std::cerr << "Error: --benchmark-generation requires --input <text>\n";
+                return 1;
+            }
+            if (tokenizer_path.empty()) {
+                std::cerr << "Error: --benchmark-generation requires --tokenizer <path>\n";
+                return 1;
+            }
+
+            LOG_INFO("\n=== Generation Benchmark Mode ===");
+
+            // Run generation benchmark
+            GenerationBenchmarkExecutor bench_executor(cpu_threads);
+            GenerationBenchmarkResults results = bench_executor.runBenchmark(
+                *graph, user_input_text, tokenizer_path, max_tokens, temperature, true);
+
+            // Save to JSON (default to generation_results.json if not specified)
+            std::string json_output = output_file.empty() ? "generation_results.json" : output_file;
+            std::ofstream out(json_output);
+            if (out.is_open()) {
+                out << results.toJSON();
+                out.close();
+                LOG_INFO("\nGeneration benchmark results saved to: ", json_output);
+            } else {
+                LOG_ERROR("Failed to open output file: ", json_output);
+            }
+
+            return 0;
+        }
+
+        // Step 2.6: Handle autoregressive generation mode
         if (generate) {
             if (user_input_text.empty()) {
                 std::cerr << "Error: --generate requires --input <text>\n";

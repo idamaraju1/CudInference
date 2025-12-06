@@ -184,15 +184,25 @@ firefox visualization/benchmark_viewer.html
 google-chrome visualization/benchmark_viewer.html
 ```
 
-Then either:
-- Click "Load File" and select `results.json`
-- Copy/paste the JSON content directly
+The viewer supports **two types of benchmarks**:
 
-The visualization provides:
+**1. Standard Benchmark** (`results.json`):
+- Load using the first input section (Standard Benchmark)
+- Shows execution time comparison across CPU thread counts and GPU
+- Click "Load JSON" and select `results.json`, or copy/paste the JSON content
+
+**2. Generation Benchmark** (`generation_results.json`):
+- Load using the second input section (Generation Benchmark)
+- Shows token generation performance (tokens/sec) across all configurations
+- Click "Load JSON" and select `generation_results.json`, or copy/paste the JSON content
+
+**Visualization Features:**
 - **Statistics Dashboard**: Key metrics including speedups and execution times
-- **Live Performance Race**: Animated comparison showing relative speeds
-- **Bar Chart**: Side-by-side comparison of all configurations
-- **Interactive Controls**: Adjustable animation speed
+- **Live Performance Race**: Animated comparison showing relative speeds (standard benchmark)
+- **Execution Time Chart**: Side-by-side comparison of all configurations (standard benchmark)
+- **Token Generation Chart**: Tokens per second comparison with speedup indicators (generation benchmark)
+- **Interactive Controls**: Adjustable animation speed for the performance race
+- **Dual View**: Load both benchmark types simultaneously to see comprehensive performance analysis
 
 ### Text Generation Mode (for LLM models)
 
@@ -232,6 +242,78 @@ If you ran `full_setup.sh` or `download_model.py`, you can use the downloaded mo
 - `--temperature F`: Sampling temperature (0.0 = greedy/deterministic, higher = more random, default: 1.0)
 - `--cpu`: Use CPU instead of GPU for generation
 - `--verbose`: Print detailed timing per token
+
+### Generation Benchmarking Mode
+
+Compare text generation performance across different CPU thread counts and GPU:
+
+```bash
+# Benchmark generation with auto-detected thread count
+./build/onnx_gpu_engine model.onnx \
+  --benchmark-generation \
+  --input "The sky is blue because" \
+  --tokenizer tokenizer.json \
+  --max-tokens 50
+```
+
+**Specify maximum thread count:**
+```bash
+./build/onnx_gpu_engine model.onnx \
+  --benchmark-generation \
+  --input "Your prompt here" \
+  --tokenizer tokenizer.json \
+  --max-tokens 50 \
+  --cpu-threads 8
+```
+
+**Save results to custom file:**
+```bash
+./build/onnx_gpu_engine model.onnx \
+  --benchmark-generation \
+  --input "Your prompt here" \
+  --tokenizer tokenizer.json \
+  --max-tokens 50 \
+  --output my_generation_results.json
+```
+
+**Required flags:**
+- `--benchmark-generation`: Enable generation benchmark mode
+- `--input TEXT`: Input text prompt to generate from
+- `--tokenizer FILE`: Path to tokenizer.json file
+
+**Optional flags:**
+- `--max-tokens N`: Maximum tokens to generate (default: 50)
+- `--temperature F`: Sampling temperature (default: 1.0)
+- `--cpu-threads N`: Maximum CPU threads to test (default: auto-detect)
+- `--output FILE`: JSON output file (default: generation_results.json)
+
+**What it does:**
+- Runs text generation on CPU with 1, 2, 3, ..., N threads
+- Runs text generation on GPU
+- Measures tokens per second for each configuration
+- Reports prefill time (first token) and decode latency (subsequent tokens)
+- Saves detailed timing results to JSON file
+
+**Example output:**
+```
+=== Generation Benchmark Summary ===
+
+Prompt: "The sky is blue because"
+Prompt tokens: 6
+Target tokens: 50
+
+Configuration   Tokens Gen   Total (ms)     Tokens/sec     Prefill (ms)   Decode (ms)    Avg Decode (ms)
+-------------------------------------------------------------------------------------------------
+CPU-1T          50           15234.56       3.28           1523.46        13711.10       279.82
+CPU-2T          50           8456.23        5.91           845.62         7610.61        155.32
+CPU-4T          50           5123.45        9.76           512.35         4611.10        94.10
+CPU-8T          50           3456.78        14.47          345.68         3111.10        63.49
+GPU             50           234.56         213.15         23.46          211.10         4.31
+-------------------------------------------------------------------------------------------------
+
+Best Throughput: GPU with 213.15 tokens/sec
+Speedup vs CPU-1T: 64.98x
+```
 
 ### Creating Test Models
 

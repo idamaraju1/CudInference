@@ -90,6 +90,15 @@ void RotaryEmbeddingOperation::execute(const Node& node, ExecutionContext& ctx) 
                 position_data = position_converted.data();
                 break;
             }
+            case DataType::UINT8: {
+                const uint8_t* src = getHostData<uint8_t>(position_tensor, position_cache);
+                position_converted.resize(position_tensor->size());
+                for (size_t i = 0; i < position_converted.size(); ++i) {
+                    position_converted[i] = static_cast<int64_t>(src[i]);
+                }
+                position_data = position_converted.data();
+                break;
+            }
             default:
                 throw std::runtime_error("RotaryEmbedding: unsupported position_ids dtype");
         }
