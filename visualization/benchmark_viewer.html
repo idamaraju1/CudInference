@@ -584,6 +584,16 @@
                 <svg id="svgChart" class="w-full max-w-4xl mx-auto" viewBox="0 0 1000 500"></svg>
             </div>
         </div>
+
+        <!-- Token Generation Performance Section -->
+        <div class="bg-white px-8 py-9 border-t border-slate-200">
+            <div class="max-w-5xl mx-auto bg-white border border-slate-200 rounded-sm p-7">
+                <h3
+                    class="text-xl font-semibold text-slate-900 mb-6 uppercase tracking-wide border-l-3 border-green-700 pl-3">
+                    Token Generation Performance Evolution</h3>
+                <svg id="svgTokenChart" class="w-full max-w-4xl mx-auto" viewBox="0 0 1000 500"></svg>
+            </div>
+        </div>
     </div>
 
     <script>
@@ -940,7 +950,7 @@
                 tickLabel.setAttribute('x', padding.left - 10);
                 tickLabel.setAttribute('y', yPos + 4);
                 tickLabel.setAttribute('text-anchor', 'end');
-                tickLabel.setAttribute('font-size', '11px');
+                tickLabel.setAttribute('font-size', '15px');
                 tickLabel.setAttribute('font-weight', '400');
                 tickLabel.setAttribute('fill', '#64748b');
                 tickLabel.setAttribute('font-family', "'IBM Plex Sans', monospace");
@@ -972,7 +982,7 @@
                 label.setAttribute('x', x + barWidth / 2);
                 label.setAttribute('y', padding.top + chartHeight + 25);
                 label.setAttribute('text-anchor', 'middle');
-                label.setAttribute('font-size', '11px');
+                label.setAttribute('font-size', '13px');
                 label.setAttribute('font-weight', '500');
                 label.setAttribute('fill', '#64748b');
                 label.setAttribute('font-family', "'IBM Plex Sans', monospace");
@@ -984,7 +994,7 @@
                 value.setAttribute('x', x + barWidth / 2);
                 value.setAttribute('y', y - 8);
                 value.setAttribute('text-anchor', 'middle');
-                value.setAttribute('font-size', '10px');
+                value.setAttribute('font-size', '13px');
                 value.setAttribute('font-weight', '600');
                 value.setAttribute('fill', '#1e293b');
                 value.setAttribute('font-family', "'IBM Plex Sans', monospace");
@@ -997,7 +1007,7 @@
             yAxisLabel.setAttribute('y', padding.top + chartHeight / 2);
             yAxisLabel.setAttribute('text-anchor', 'middle');
             yAxisLabel.setAttribute('transform', `rotate(-90, 20, ${padding.top + chartHeight / 2})`);
-            yAxisLabel.setAttribute('font-size', '12px');
+            yAxisLabel.setAttribute('font-size', '20px');
             yAxisLabel.setAttribute('font-weight', '400');
             yAxisLabel.setAttribute('fill', '#64748b');
             yAxisLabel.setAttribute('font-family', "'IBM Plex Sans', monospace");
@@ -1013,7 +1023,7 @@
                 speedupText.setAttribute('x', width / 2);
                 speedupText.setAttribute('y', padding.top + chartHeight + 70);
                 speedupText.setAttribute('text-anchor', 'middle');
-                speedupText.setAttribute('font-size', '10px');
+                speedupText.setAttribute('font-size', '20px');
                 speedupText.setAttribute('font-weight', '600');
                 speedupText.setAttribute('fill', '#0d9488');
                 speedupText.setAttribute('font-family', "'IBM Plex Sans', monospace");
@@ -1021,6 +1031,203 @@
                 svg.appendChild(speedupText);
             }
         }
+
+        function renderTokenGenerationChart() {
+            const svg = document.getElementById('svgTokenChart');
+            svg.innerHTML = '';
+
+            // Token generation performance data
+            const tokenData = [
+                { name: 'No KV Cache', tokensPerSec: 0.2, timeFor30: 150, color: '#b5271e', description: 'O(n²) recomputation' },
+                { name: 'With KV Cache', tokensPerSec: 0.6, timeFor30: 50, color: '#b5271e', description: 'O(n) complexity' },
+                { name: 'Full GPU', tokensPerSec: 10.6, timeFor30: 3, color: '#15803d', description: 'No CPU↔GPU transfers' }
+            ];
+
+            const width = 1000;
+            const height = 500;
+            const padding = { top: 40, right: 60, bottom: 120, left: 100 };
+            const chartWidth = width - padding.left - padding.right;
+            const chartHeight = height - padding.top - padding.bottom;
+
+            // Use tokens/sec as the primary metric
+            const maxValue = Math.max(...tokenData.map(d => d.tokensPerSec));
+            const maxTick = Math.ceil(maxValue / 2) * 2; // Round up to nearest even number
+            const scale = chartHeight / maxTick;
+
+            // Draw Y-axis line
+            const yAxis = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+            yAxis.setAttribute('x1', padding.left);
+            yAxis.setAttribute('y1', padding.top);
+            yAxis.setAttribute('x2', padding.left);
+            yAxis.setAttribute('y2', padding.top + chartHeight);
+            yAxis.setAttribute('stroke', '#D0D0D0');
+            yAxis.setAttribute('stroke-width', '2');
+            svg.appendChild(yAxis);
+
+            // Draw Y-axis ticks and gridlines
+            const numTicks = 6;
+            const tickInterval = maxTick / numTicks;
+            for (let i = 0; i <= numTicks; i++) {
+                const tickValue = i * tickInterval;
+                const yPos = padding.top + chartHeight - (tickValue * scale);
+
+                // Gridline
+                const gridline = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                gridline.setAttribute('x1', padding.left);
+                gridline.setAttribute('y1', yPos);
+                gridline.setAttribute('x2', padding.left + chartWidth);
+                gridline.setAttribute('y2', yPos);
+                gridline.setAttribute('stroke', '#E2E2E2');
+                gridline.setAttribute('stroke-width', '1');
+                gridline.setAttribute('stroke-dasharray', i === 0 ? 'none' : '4,4');
+                svg.appendChild(gridline);
+
+                // Tick mark
+                const tick = document.createElementNS('http://www.w3.org/2000/svg', 'line');
+                tick.setAttribute('x1', padding.left - 5);
+                tick.setAttribute('y1', yPos);
+                tick.setAttribute('x2', padding.left);
+                tick.setAttribute('y2', yPos);
+                tick.setAttribute('stroke', '#64748b');
+                tick.setAttribute('stroke-width', '2');
+                svg.appendChild(tick);
+
+                // Tick label
+                const tickLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                tickLabel.setAttribute('x', padding.left - 10);
+                tickLabel.setAttribute('y', yPos + 4);
+                tickLabel.setAttribute('text-anchor', 'end');
+                tickLabel.setAttribute('font-size', '13px');
+                tickLabel.setAttribute('font-weight', '400');
+                tickLabel.setAttribute('fill', '#64748b');
+                tickLabel.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                tickLabel.textContent = tickValue.toFixed(1);
+                svg.appendChild(tickLabel);
+            }
+
+            // Draw bars
+            const barWidth = 100;
+            const spacing = 150;
+            const totalWidth = tokenData.length * barWidth + (tokenData.length - 1) * spacing;
+            const startX = padding.left + (chartWidth - totalWidth) / 2;
+
+            tokenData.forEach((data, i) => {
+                const barHeight = data.tokensPerSec * scale;
+                const x = startX + i * (barWidth + spacing);
+                const y = padding.top + chartHeight - barHeight;
+
+                // Bar
+                const bar = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
+                bar.setAttribute('x', x);
+                bar.setAttribute('y', y);
+                bar.setAttribute('width', barWidth);
+                bar.setAttribute('height', barHeight);
+                bar.setAttribute('rx', '6');
+                bar.setAttribute('fill', data.color);
+                bar.setAttribute('class', 'transition-all hover:opacity-80 cursor-pointer');
+                svg.appendChild(bar);
+
+                // Label (optimization name)
+                const label = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                label.setAttribute('x', x + barWidth / 2);
+                label.setAttribute('y', padding.top + chartHeight + 25);
+                label.setAttribute('text-anchor', 'middle');
+                label.setAttribute('font-size', '17px');
+                label.setAttribute('font-weight', '600');
+                label.setAttribute('fill', '#1e293b');
+                label.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                label.textContent = data.name;
+                svg.appendChild(label);
+
+                // Description
+                const description = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                description.setAttribute('x', x + barWidth / 2);
+                description.setAttribute('y', padding.top + chartHeight + 42);
+                description.setAttribute('text-anchor', 'middle');
+                description.setAttribute('font-size', '13px');
+                description.setAttribute('font-weight', '400');
+                description.setAttribute('fill', '#64748b');
+                description.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                description.textContent = data.description;
+                svg.appendChild(description);
+
+                // Tokens/sec value on top of bar
+                const tokensValue = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                tokensValue.setAttribute('x', x + barWidth / 2);
+                tokensValue.setAttribute('y', y - 20);
+                tokensValue.setAttribute('text-anchor', 'middle');
+                tokensValue.setAttribute('font-size', '20px');
+                tokensValue.setAttribute('font-weight', '700');
+                tokensValue.setAttribute('fill', data.color);
+                tokensValue.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                tokensValue.textContent = `${data.tokensPerSec.toFixed(1)} tok/s`;
+                svg.appendChild(tokensValue);
+
+                // Time for 30 tokens (smaller text below)
+                const timeValue = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                timeValue.setAttribute('x', x + barWidth / 2);
+                timeValue.setAttribute('y', y - 6);
+                timeValue.setAttribute('text-anchor', 'middle');
+                timeValue.setAttribute('font-size', '11px');
+                timeValue.setAttribute('font-weight', '500');
+                timeValue.setAttribute('fill', '#64748b');
+                timeValue.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                timeValue.textContent = `(${data.timeFor30}s for 30 tok)`;
+                svg.appendChild(timeValue);
+
+                // Speedup indicators
+                if (i > 0) {
+                    const prevData = tokenData[i - 1];
+                    const speedup = data.tokensPerSec / prevData.tokensPerSec;
+
+                    // Arrow and speedup text between bars
+                    const arrowX = x - spacing / 2;
+                    const arrowY = padding.top + chartHeight / 2;
+
+                    const speedupText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+                    speedupText.setAttribute('x', arrowX);
+                    speedupText.setAttribute('y', arrowY);
+                    speedupText.setAttribute('text-anchor', 'middle');
+                    speedupText.setAttribute('font-size', '18px');
+                    speedupText.setAttribute('font-weight', '700');
+                    speedupText.setAttribute('fill', '#15803d');
+                    speedupText.setAttribute('font-family', "'IBM Plex Sans', monospace");
+                    speedupText.textContent = `→ ${speedup.toFixed(1)}×`;
+                    svg.appendChild(speedupText);
+                }
+            });
+
+            // Y-axis label
+            const yAxisLabel = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            yAxisLabel.setAttribute('x', 20);
+            yAxisLabel.setAttribute('y', padding.top + chartHeight / 2);
+            yAxisLabel.setAttribute('text-anchor', 'middle');
+            yAxisLabel.setAttribute('transform', `rotate(-90, 20, ${padding.top + chartHeight / 2})`);
+            yAxisLabel.setAttribute('font-size', '18px');
+            yAxisLabel.setAttribute('font-weight', '400');
+            yAxisLabel.setAttribute('fill', '#64748b');
+            yAxisLabel.setAttribute('font-family', "'IBM Plex Sans', monospace");
+            yAxisLabel.textContent = 'Tokens Per Second';
+            svg.appendChild(yAxisLabel);
+
+            // Overall speedup summary
+            const overallSpeedup = tokenData[2].tokensPerSec / tokenData[0].tokensPerSec;
+            const summaryText = document.createElementNS('http://www.w3.org/2000/svg', 'text');
+            summaryText.setAttribute('x', width / 2);
+            summaryText.setAttribute('y', padding.top + chartHeight + 85);
+            summaryText.setAttribute('text-anchor', 'middle');
+            summaryText.setAttribute('font-size', '18px');
+            summaryText.setAttribute('font-weight', '700');
+            summaryText.setAttribute('fill', '#15803d');
+            summaryText.setAttribute('font-family', "'IBM Plex Sans', monospace");
+            summaryText.textContent = `⟩ overall speedup: ${overallSpeedup.toFixed(1)}× improvement (${tokenData[0].tokensPerSec.toFixed(1)} → ${tokenData[2].tokensPerSec.toFixed(1)} tokens/sec)`;
+            svg.appendChild(summaryText);
+        }
+
+        // Call the token generation chart rendering function on page load
+        document.addEventListener('DOMContentLoaded', function () {
+            renderTokenGenerationChart();
+        });
     </script>
 </body>
 
