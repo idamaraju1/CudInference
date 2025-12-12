@@ -1,0 +1,147 @@
+#include "simplified_layernorm_operation.hpp"
+#include "operation_registry.hpp"
+#include "operation_utils.hpp"
+#include "../executors/gpu/kernels/gpu_kernels.cuh"
+
+namespace onnx_runner {
+
+using namespace operation_utils;
+
+void SimplifiedLayerNormOperation::execute(const Node& node, ExecutionContext& ctx) {
+    if (node.inputs().size() < 1 || node.inputs().size() > 3 || node.outputs().size() != 1) {
+        throw std::runtime_error("SimplifiedLayerNormalization expects X[, gamma][, beta] and 1 output");
+    }
+
+    auto X = getTensor(node.inputs()[0], ctx);
+    if (X->dtype() != DataType::FLOAT32) {
+        throw std::runtime_error("SimplifiedLayerNormalization currently supports FLOAT32 tensors only");
+    }
+
+    auto Y = allocateOutput(X->shape(), ctx, X->dtype());
+    size_t total = X->size();
+
+    int64_t axis_attr = node.getIntAttr("axis", static_cast<int64_t>(X->ndim()) - 1);
+    if (axis_attr < 0) {
+        axis_attr += static_cast<int64_t>(X->ndim());
+    }
+    if (axis_attr < 0 || axis_attr >= static_cast<int64_t>(X->ndim())) {
+        throw std::runtime_error("SimplifiedLayerNormalization: invalid axis attribute");
+    }
+
+    size_t N = 1;
+    for (int64_t i = axis_attr; i < static_cast<int64_t>(X->ndim()); ++i) {
+        N *= static_cast<size_t>(X->dim(static_cast<size_t>(i)));
+    }
+    if (N == 0 || total % N != 0) {
+        throw std::runtime_error("SimplifiedLayerNormalization: invalid hidden size computed from axis");
+    }
+    size_t M = total / N;
+    const auto int_max = static_cast<size_t>(std::numeric_limits<int>::max());
+    if (M > int_max || N > int_max) {
+        throw std::runtime_error("SimplifiedLayerNormalization: M or N too large for kernel launch");
+    }
+    float epsilon = node.getFloatAttr("epsilon", 1e-5f);
+
+    std::shared_ptr<Tensor> gamma_tensor = nullptr;
+    std::shared_ptr<Tensor> beta_tensor = nullptr;
+    if (node.inputs().size() >= 2) {
+        gamma_tensor = getTensor(node.inputs()[1], ctx);
+    }
+    if (node.inputs().size() >= 3) {
+        beta_tensor = getTensor(node.inputs()[2], ctx);
+    }
+
+    auto validateScale = [&](const std::shared_ptr<Tensor>& tensor, const char* name) {
+        if (!tensor) return;
+        if (tensor->dtype() != DataType::FLOAT32) {
+            throw std::runtime_error(std::string("SimplifiedLayerNormalization: ") + name + " must be FLOAT32");
+        }
+        size_t count = tensor->size();
+        if (count != N) {
+            throw std::runtime_error(std::string("SimplifiedLayerNormalization: ") + name + " size (" +
+                                     std::to_string(count) + ") must equal normalized dimension (" +
+                                     std::to_string(N) + ")");
+        }
+    };
+
+    validateScale(gamma_tensor, "gamma");
+    validateScale(beta_tensor, "beta");
+
+    // GPU_PERSISTENT MODE
+    if (ctx.gpu_mode == ExecutionContext::GPUMode::PERSISTENT) {
+        X->ensureOnGPU();
+
+        const float* d_X = X->deviceData<float>();
+        float* d_Y = Y->mutableDeviceData<float>();
+
+        const float* d_gamma = nullptr;
+        const float* d_beta = nullptr;
+
+        if (gamma_tensor) {
+            gamma_tensor->ensureOnGPU();
+            d_gamma = gamma_tensor->deviceData<float>();
+        }
+        if (beta_tensor) {
+            beta_tensor->ensureOnGPU();
+            d_beta = beta_tensor->deviceData<float>();
+        }
+
+        kernels::launchSimplifiedLayerNorm(
+            d_X, d_gamma, d_beta, d_Y,
+            static_cast<int>(M), static_cast<int>(N),
+            epsilon, 0
+        );
+
+        storeOutput(node.outputs()[0], Y, ctx);
+        return;
+    }
+
+    if (ctx.use_cpu) {
+        std::vector<uint8_t> x_cache, gamma_cache, beta_cache;
+        const float* x_data = getHostData<float>(X, x_cache);
+        const float* gamma_host = gamma_tensor ? getHostData<float>(gamma_tensor, gamma_cache) : nullptr;
+        const float* beta_host = beta_tensor ? getHostData<float>(beta_tensor, beta_cache) : nullptr;
+        float* y_data = Y->data<float>();
+
+        if (ctx.num_cpu_threads > 1) {
+            kernels::simplifiedLayerNormCPUMultiThreaded(
+                x_data, gamma_host, beta_host, y_data,
+                static_cast<int>(M), static_cast<int>(N),
+                epsilon, ctx.num_cpu_threads);
+        } else {
+            kernels::simplifiedLayerNormCPU(
+                x_data, gamma_host, beta_host, y_data,
+                static_cast<int>(M), static_cast<int>(N),
+                epsilon);
+        }
+
+        storeOutput(node.outputs()[0], Y, ctx);
+        return;
+    }
+
+    // GPU_COPY mode
+    if (X->device() == DeviceType::CPU) X->toGPU();
+    if (Y->device() == DeviceType::CPU) Y->toGPU();
+
+    const float* gammaDev = nullptr;
+    const float* betaDev = nullptr;
+    if (gamma_tensor) {
+        if (gamma_tensor->device() == DeviceType::CPU) gamma_tensor->toGPU();
+        gammaDev = gamma_tensor->data<float>();
+    }
+    if (beta_tensor) {
+        if (beta_tensor->device() == DeviceType::CPU) beta_tensor->toGPU();
+        betaDev = beta_tensor->data<float>();
+    }
+
+    kernels::launchSimplifiedLayerNorm(
+        X->data<float>(), gammaDev, betaDev, Y->data<float>(), (int)M, (int)N, epsilon, 0);
+    CUDA_CHECK(cudaDeviceSynchronize());
+
+    storeOutput(node.outputs()[0], Y, ctx);
+}
+
+// Register the operation
+REGISTER_OPERATION(OpType::SIMPLIFIEDLAYERNORM, SimplifiedLayerNormOperation)
+
+} // namespace onnx_runner

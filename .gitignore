@@ -38,3 +38,5 @@ venv/
 
 # Logs
 *.log
+
+*tokenizer.json

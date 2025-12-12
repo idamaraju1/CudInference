@@ -42,6 +42,23 @@ std::shared_ptr<Graph> ModelParser::parse(const std::string& model_path) {
         LOG_DEBUG("  Initializer: ", name, " ", tensor->shapeStr());
     }
 
+    // Parse sparse initializers (sparse weights/parameters stored in COO format)
+    LOG_INFO("Parsing ", onnx_graph.sparse_initializer_size(), " sparse initializers...");
+    for (int i = 0; i < onnx_graph.sparse_initializer_size(); ++i) {
+        const onnx::SparseTensorProto& sparse_proto = onnx_graph.sparse_initializer(i);
+        std::string name = sparse_proto.values().name();
+
+        // Check for name conflicts with regular initializers
+        if (graph->isInitializer(name)) {
+            throw std::runtime_error("Sparse initializer name conflicts with regular initializer: " + name);
+        }
+
+        auto tensor = parseSparseTensorProto(&sparse_proto);
+        graph->addInitializer(name, tensor);
+
+        LOG_DEBUG("  Sparse Initializer: ", name, " ", tensor->shapeStr());
+    }
+
     // Parse graph inputs
     LOG_INFO("Parsing ", onnx_graph.input_size(), " inputs...");
     for (int i = 0; i < onnx_graph.input_size(); ++i) {
@@ -137,6 +154,19 @@ std::shared_ptr<Graph> ModelParser::parse(const std::string& model_path) {
                     node->setAttribute(attr_name, AttributeValue::fromInts(values));
                     break;
                 }
+                case onnx::AttributeProto::FLOATS: {
+                    std::vector<float> values;
+                    for (int k = 0; k < attr.floats_size(); ++k) {
+                        values.push_back(attr.floats(k));
+                    }
+                    node->setAttribute(attr_name, AttributeValue::fromFloats(values));
+                    break;
+                }
+                case onnx::AttributeProto::TENSOR: {
+                    auto tensor_attr = parseTensorProto(&attr.t());
+                    node->setAttribute(attr_name, AttributeValue::fromTensor(tensor_attr));
+                    break;
+                }
                 default:
                     LOG_WARN("  Unsupported attribute type for ", attr_name);
                     break;
@@ -228,6 +258,106 @@ std::shared_ptr<Tensor> ModelParser::parseTensorProto(const void* proto_ptr) {
     // Add more data types as needed
 
     return tensor;
+}
+
+std::shared_ptr<Tensor> ModelParser::parseSparseTensorProto(const void* proto_ptr) {
+    const onnx::SparseTensorProto* sparse_proto = static_cast<const onnx::SparseTensorProto*>(proto_ptr);
+
+    // Extract dense shape from dims
+    std::vector<int64_t> shape;
+    for (int i = 0; i < sparse_proto->dims_size(); ++i) {
+        shape.push_back(sparse_proto->dims(i));
+    }
+
+    // Calculate total size
+    int64_t total_size = 1;
+    for (auto dim : shape) {
+        total_size *= dim;
+    }
+
+    LOG_DEBUG("  Sparse tensor shape: ", Tensor(shape).shapeStr(), ", total elements: ", total_size);
+
+    // Parse the values tensor (contains NNZ non-zero elements)
+    if (!sparse_proto->has_values()) {
+        throw std::runtime_error("SparseTensorProto missing values field");
+    }
+    auto values_tensor = parseTensorProto(&sparse_proto->values());
+    int64_t nnz = values_tensor->size(); // Number of non-zero elements
+    LOG_DEBUG("  Number of non-zero elements (NNZ): ", nnz);
+
+    // Parse the indices tensor
+    if (!sparse_proto->has_indices()) {
+        throw std::runtime_error("SparseTensorProto missing indices field");
+    }
+    auto indices_tensor = parseTensorProto(&sparse_proto->indices());
+
+    // Get data type from values tensor
+    DataType dtype = values_tensor->dtype();
+
+    // Currently only support FLOAT32
+    if (dtype != DataType::FLOAT32) {
+        throw std::runtime_error("Sparse tensors currently only support FLOAT32 data type");
+    }
+
+    // Create dense tensor filled with zeros
+    auto dense_tensor = std::make_shared<Tensor>(shape, dtype);
+    float* dense_data = dense_tensor->data<float>();
+    std::memset(dense_data, 0, total_size * sizeof(float));
+
+    // Get values data
+    const float* values_data = values_tensor->data<float>();
+
+    // Determine index format and populate dense tensor
+    const auto& indices_shape = indices_tensor->shape();
+
+    if (indices_shape.size() == 2 && indices_shape[0] == nnz) {
+        // 2D indices format: [NNZ, rank]
+        // Each row contains the multi-dimensional index for a value
+        int64_t rank = indices_shape[1];
+        LOG_DEBUG("  Using 2D indices format: [", nnz, ", ", rank, "]");
+
+        if (rank != (int64_t)shape.size()) {
+            throw std::runtime_error("Sparse tensor rank mismatch");
+        }
+
+        const int64_t* indices_data = indices_tensor->data<int64_t>();
+
+        for (int64_t i = 0; i < nnz; ++i) {
+            // Compute linear index from multi-dimensional index
+            int64_t linear_idx = 0;
+            int64_t stride = 1;
+            for (int64_t j = rank - 1; j >= 0; --j) {
+                int64_t idx = indices_data[i * rank + j];
+                if (idx < 0 || idx >= shape[j]) {
+                    throw std::runtime_error("Sparse tensor index out of bounds");
+                }
+                linear_idx += idx * stride;
+                stride *= shape[j];
+            }
+
+            dense_data[linear_idx] = values_data[i];
+        }
+
+    } else if (indices_shape.size() == 1 && indices_shape[0] == nnz) {
+        // 1D linearized indices format: [NNZ]
+        LOG_DEBUG("  Using 1D linearized indices format: [", nnz, "]");
+
+        const int64_t* indices_data = indices_tensor->data<int64_t>();
+
+        for (int64_t i = 0; i < nnz; ++i) {
+            int64_t linear_idx = indices_data[i];
+            if (linear_idx < 0 || linear_idx >= total_size) {
+                throw std::runtime_error("Sparse tensor linearized index out of bounds");
+            }
+            dense_data[linear_idx] = values_data[i];
+        }
+
+    } else {
+        throw std::runtime_error("Invalid sparse tensor indices shape");
+    }
+
+    LOG_DEBUG("  Converted sparse tensor to dense format");
+    return dense_tensor;
 }
 
 } // namespace onnx_runner

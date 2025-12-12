@@ -21,6 +21,9 @@ private:
 
     // Helper to extract tensor data from ONNX TensorProto
     std::shared_ptr<Tensor> parseTensorProto(const void* tensor_proto);
+
+    // Helper to convert ONNX SparseTensorProto to dense Tensor
+    std::shared_ptr<Tensor> parseSparseTensorProto(const void* sparse_tensor_proto);
 };
 
 } // namespace onnx_runner

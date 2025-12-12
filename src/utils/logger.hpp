@@ -12,7 +12,8 @@ enum class LogLevel {
     DEBUG,
     INFO,
     WARNING,
-    ERROR
+    ERROR,
+    OFF
 };
 
 class Logger {
@@ -72,6 +73,7 @@ private:
             case LogLevel::INFO:    return "INFO ";
             case LogLevel::WARNING: return "WARN ";
             case LogLevel::ERROR:   return "ERROR";
+            case LogLevel::OFF:     return "OFF  ";
             default: return "UNKNOWN";
         }
     }

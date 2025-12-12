@@ -13,25 +13,36 @@ class Tensor;
 // Supported operation types
 enum class OpType {
     UNKNOWN,
+    // Arithmetic / linear algebra
     MATMUL,
-    RELU,
-    ADD,
     GEMM,
-    CONV,
-    MAXPOOL,
-    FLATTEN,
-    RESHAPE,
-    SOFTMAX,
-    BATCHNORM
+    ADD,
+    SUB,
+    MUL,
+    RELU,
+    // Tensor manipulation
+    TRANSPOSE,
+    GATHER,
+    SHAPE,
+    CAST,
+    // Activations
+    SIGMOID,
+    // Reductions
+    REDUCESUM,
+    // Advanced operations
+    ROTARYEMBEDDING,
+    GROUPQUERYATTENTION,
+    SIMPLIFIEDLAYERNORM,
+    SKIPSIMPLIFIEDLAYERNORM
 };
 
 // Convert string to OpType
 OpType stringToOpType(const std::string& op_name);
 std::string opTypeToString(OpType op_type);
 
-// Attribute value (simplified - supports int, float, string, and lists)
+// Attribute value (supports scalars, lists, and tensors)
 struct AttributeValue {
-    enum class Type { INT, FLOAT, STRING, INTS, FLOATS, STRINGS } type;
+    enum class Type { INT, FLOAT, STRING, INTS, FLOATS, STRINGS, TENSOR } type;
 
     int64_t i;
     float f;
@@ -39,6 +50,7 @@ struct AttributeValue {
     std::vector<int64_t> ints;
     std::vector<float> floats;
     std::vector<std::string> strings;
+    std::shared_ptr<Tensor> tensor;
 
     static AttributeValue fromInt(int64_t value) {
         AttributeValue attr;
@@ -65,6 +77,20 @@ struct AttributeValue {
         AttributeValue attr;
         attr.type = Type::INTS;
         attr.ints = values;
+        return attr;
+    }
+
+    static AttributeValue fromTensor(const std::shared_ptr<Tensor>& value) {
+        AttributeValue attr;
+        attr.type = Type::TENSOR;
+        attr.tensor = value;
+        return attr;
+    }
+
+    static AttributeValue fromFloats(const std::vector<float>& values) {
+        AttributeValue attr;
+        attr.type = Type::FLOATS;
+        attr.floats = values;
         return attr;
     }
 };
@@ -120,6 +146,14 @@ public:
             return it->second.ints;
         }
         return {};
+    }
+
+    std::shared_ptr<Tensor> getTensorAttr(const std::string& name) const {
+        auto it = attributes_.find(name);
+        if (it != attributes_.end() && it->second.type == AttributeValue::Type::TENSOR) {
+            return it->second.tensor;
+        }
+        return nullptr;
     }
 
 private:

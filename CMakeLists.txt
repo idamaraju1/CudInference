@@ -33,6 +33,7 @@ add_library(onnx_proto ${ONNX_PROTO_SOURCES})
 target_include_directories(onnx_proto PUBLIC ${ONNX_PROTO_DIR})
 target_link_libraries(onnx_proto PUBLIC protobuf::libprotobuf)
 
+
 # Source files
 set(CORE_SOURCES
     src/core/model_parser.cpp
@@ -45,15 +46,58 @@ set(UTILS_SOURCES
     src/utils/logger.cpp
 )
 
-set(GPU_SOURCES
-    src/gpu/gpu_executor.cpp
-    src/gpu/benchmark.cpp
+set(EXECUTOR_SOURCES
+    src/executors/gpu_executor.cpp
+    src/executors/cpu_executor.cpp
+    src/executors/benchmark.cpp
+    src/executors/generation_benchmark.cpp
+    src/executors/autoregressive_generator.cpp
+)
+
+set(OPERATION_SOURCES
+    src/operations/add_operation.cpp
+    src/operations/relu_operation.cpp
+    src/operations/sub_operation.cpp
+    src/operations/sigmoid_operation.cpp
+    src/operations/mul_operation.cpp
+    src/operations/shape_operation.cpp
+    src/operations/transpose_operation.cpp
+    src/operations/cast_operation.cpp
+    src/operations/reducesum_operation.cpp
+    src/operations/gemm_operation.cpp
+    src/operations/gather_operation.cpp
+    src/operations/matmul_operation.cpp
+    src/operations/simplified_layernorm_operation.cpp
+    src/operations/skip_simplified_layernorm_operation.cpp
+    src/operations/rotary_embedding_operation.cpp
+    src/operations/group_query_attention_operation.cpp
+    src/operations/operation_utils.cpp
+)
+
+set(CPU_KERNEL_SOURCES
+    src/executors/cpu/kernels/add.cpp
+    src/executors/cpu/kernels/relu.cpp
+    src/executors/cpu/kernels/sub.cpp
+    src/executors/cpu/kernels/matmul.cpp
+    src/executors/cpu/kernels/sigmoid.cpp
+    src/executors/cpu/kernels/layernorm.cpp
 )
 
 set(CUDA_SOURCES
-    src/gpu/kernels/matmul.cu
-    src/gpu/kernels/relu.cu
-    src/gpu/kernels/add.cu
+    src/executors/gpu/kernels/matmul.cu
+    src/executors/gpu/kernels/relu.cu
+    src/executors/gpu/kernels/add.cu
+    src/executors/gpu/kernels/gather.cu
+    src/executors/gpu/kernels/elementwise.cu
+    src/executors/gpu/kernels/reducemean.cu
+    src/executors/gpu/kernels/tensor_ops.cu
+    src/executors/gpu/kernels/layernorm.cu
+    src/executors/gpu/kernels/sub.cu
+    src/executors/gpu/kernels/sigmoid.cu
+    src/executors/gpu/kernels/reducesum.cu
+    src/executors/gpu/kernels/rotary_embedding.cu
+    src/executors/gpu/kernels/group_query_attention.cu
+    src/executors/gpu/kernels/kv_reformat.cu
 )
 
 # Main executable
@@ -61,7 +105,9 @@ add_executable(onnx_gpu_engine
     src/main.cpp
     ${CORE_SOURCES}
     ${UTILS_SOURCES}
-    ${GPU_SOURCES}
+    ${EXECUTOR_SOURCES}
+    ${OPERATION_SOURCES}
+    ${CPU_KERNEL_SOURCES}
     ${CUDA_SOURCES}
 )
 

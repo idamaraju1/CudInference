@@ -47,24 +47,56 @@ pip install -r scripts/requirements.txt
 
 ## Build Instructions
 
-### 1. Clone the Repository
+### Quick Setup (Automated)
+
+For a complete automated setup that downloads everything and builds the project:
+
+```bash
+./scripts/setup/full_setup.sh
+```
+
+This will:
+1. Check all dependencies
+2. Download SmolLM2-135M model and tokenizer from HuggingFace
+3. Setup ONNX protobuf definitions
+4. Configure and build the project
+
+**Note**: The model download is ~500MB and may take a few minutes depending on your internet connection.
+
+### Manual Setup (Step-by-Step)
+
+If you prefer manual control or want to use your own models:
+
+#### 1. Clone the Repository
 
 ```bash
 git clone <your-repo-url>
-cd ONNX-GPU-Execution-Engine
+cd OnnxRunner
 ```
 
-### 2. Download and Compile ONNX Proto Files
+#### 2. Download and Compile ONNX Proto Files
 
 Run the setup script to download ONNX proto definitions and compile them:
 
 ```bash
-./scripts/setup_onnx_proto.sh
+./scripts/setup/setup_onnx_proto.sh
 ```
 
 This will create the `third_party/onnx/` directory with compiled protobuf files.
 
-### 3. Configure GPU Architecture (Optional)
+#### 3. (Optional) Download Test Model
+
+To download the SmolLM2-135M model for text generation:
+
+```bash
+python3 scripts/setup/download_model.py
+```
+
+This downloads:
+- `model.onnx` - SmolLM2-135M language model (~500MB)
+- `tokenizer.json` - HuggingFace tokenizer
+
+#### 4. Configure GPU Architecture (Optional)
 
 Edit `CMakeLists.txt` line 10 to match your GPU compute capability:
 
@@ -78,7 +110,7 @@ set(CMAKE_CUDA_ARCHITECTURES "75;86;89")
 
 You can specify multiple architectures separated by semicolons, or just one for faster compilation.
 
-### 4. Build the Project
+#### 5. Build the Project
 
 ```bash
 mkdir build
@@ -113,6 +145,7 @@ Options:
   --cpu-threads N   Max CPU threads for benchmark mode (default: auto-detect)
                     Benchmark will test 1 to N threads
   --verbose         Print detailed timing information
+  --quiet           Suppress logs; stream generated text only
   --debug           Enable debug logging
   --benchmark       Run multi-configuration benchmark (CPU 1-N threads + GPU)
   --output FILE     Save benchmark results to JSON file (default: results.json)
@@ -151,34 +184,176 @@ firefox visualization/benchmark_viewer.html
 google-chrome visualization/benchmark_viewer.html
 ```
 
-Then either:
-- Click "Load File" and select `results.json`
-- Copy/paste the JSON content directly
+The viewer supports **two types of benchmarks**:
 
-The visualization provides:
+**1. Standard Benchmark** (`results.json`):
+- Load using the first input section (Standard Benchmark)
+- Shows execution time comparison across CPU thread counts and GPU
+- Click "Load JSON" and select `results.json`, or copy/paste the JSON content
+
+**2. Generation Benchmark** (`generation_results.json`):
+- Load using the second input section (Generation Benchmark)
+- Shows token generation performance (tokens/sec) across all configurations
+- Click "Load JSON" and select `generation_results.json`, or copy/paste the JSON content
+
+**Visualization Features:**
 - **Statistics Dashboard**: Key metrics including speedups and execution times
-- **Live Performance Race**: Animated comparison showing relative speeds
-- **Bar Chart**: Side-by-side comparison of all configurations
-- **Interactive Controls**: Adjustable animation speed
+- **Live Performance Race**: Animated comparison showing relative speeds (standard benchmark)
+- **Execution Time Chart**: Side-by-side comparison of all configurations (standard benchmark)
+- **Token Generation Chart**: Tokens per second comparison with speedup indicators (generation benchmark)
+- **Interactive Controls**: Adjustable animation speed for the performance race
+- **Dual View**: Load both benchmark types simultaneously to see comprehensive performance analysis
+
+### Text Generation Mode (for LLM models)
+
+Run language models in auto-regressive generation mode.
+
+**Using the downloaded SmolLM2-135M model:**
+
+If you ran `full_setup.sh` or `download_model.py`, you can use the downloaded model:
+
+```bash
+./build/onnx_gpu_engine model.onnx \
+  --input "The sky is blue because" \
+  --tokenizer tokenizer.json \
+  --generate \
+  --max-tokens 50 \
+  --temperature 0.0
+```
+
+**Using a custom model:**
+
+```bash
+./build/onnx_gpu_engine /path/to/your/model.onnx \
+  --input "Your input prompt" \
+  --tokenizer /path/to/tokenizer.json \
+  --generate \
+  --max-tokens 50 \
+  --temperature 0.0
+```
+
+**Required flags for generation mode:**
+- `--input TEXT`: Input text prompt to generate from
+- `--tokenizer FILE`: Path to tokenizer.json file (HuggingFace format)
+- `--generate`: Enable auto-regressive text generation mode
+
+**Optional flags:**
+- `--max-tokens N`: Maximum number of tokens to generate (default: 50)
+- `--temperature F`: Sampling temperature (0.0 = greedy/deterministic, higher = more random, default: 1.0)
+- `--cpu`: Use CPU instead of GPU for generation
+- `--verbose`: Print detailed timing per token
+
+### Generation Benchmarking Mode
+
+Compare text generation performance across different CPU thread counts and GPU:
+
+```bash
+# Benchmark generation with auto-detected thread count
+./build/onnx_gpu_engine model.onnx \
+  --benchmark-generation \
+  --input "The sky is blue because" \
+  --tokenizer tokenizer.json \
+  --max-tokens 50
+```
+
+**Specify maximum thread count:**
+```bash
+./build/onnx_gpu_engine model.onnx \
+  --benchmark-generation \
+  --input "Your prompt here" \
+  --tokenizer tokenizer.json \
+  --max-tokens 50 \
+  --cpu-threads 8
+```
+
+**Save results to custom file:**
+```bash
+./build/onnx_gpu_engine model.onnx \
+  --benchmark-generation \
+  --input "Your prompt here" \
+  --tokenizer tokenizer.json \
+  --max-tokens 50 \
+  --output my_generation_results.json
+```
+
+**Required flags:**
+- `--benchmark-generation`: Enable generation benchmark mode
+- `--input TEXT`: Input text prompt to generate from
+- `--tokenizer FILE`: Path to tokenizer.json file
+
+**Optional flags:**
+- `--max-tokens N`: Maximum tokens to generate (default: 50)
+- `--temperature F`: Sampling temperature (default: 1.0)
+- `--cpu-threads N`: Maximum CPU threads to test (default: auto-detect)
+- `--output FILE`: JSON output file (default: generation_results.json)
+
+**What it does:**
+- Runs text generation on CPU with 1, 2, 3, ..., N threads
+- Runs text generation on GPU
+- Measures tokens per second for each configuration
+- Reports prefill time (first token) and decode latency (subsequent tokens)
+- Saves detailed timing results to JSON file
+
+**Example output:**
+```
+=== Generation Benchmark Summary ===
+
+Prompt: "The sky is blue because"
+Prompt tokens: 6
+Target tokens: 50
+
+Configuration   Tokens Gen   Total (ms)     Tokens/sec     Prefill (ms)   Decode (ms)    Avg Decode (ms)
+-------------------------------------------------------------------------------------------------
+CPU-1T          50           15234.56       3.28           1523.46        13711.10       279.82
+CPU-2T          50           8456.23        5.91           845.62         7610.61        155.32
+CPU-4T          50           5123.45        9.76           512.35         4611.10        94.10
+CPU-8T          50           3456.78        14.47          345.68         3111.10        63.49
+GPU             50           234.56         213.15         23.46          211.10         4.31
+-------------------------------------------------------------------------------------------------
+
+Best Throughput: GPU with 213.15 tokens/sec
+Speedup vs CPU-1T: 64.98x
+```
 
 ### Creating Test Models
 
 Use the provided Python script to create test ONNX models:
 
 ```bash
-python3 scripts/create_test_model.py
+python3 scripts/export_models.py
 ```
 
-This will generate simple ONNX models for testing the engine.
+This will generate simple ONNX models for testing the engine (simple_linear.onnx, two_layer.onnx, residual.onnx).
 
 ## Supported Operations
 
-Currently implemented operations:
-
-- **MatMul**: Matrix multiplication
-- **Gemm**: General matrix multiply with bias (alpha=1, beta=1)
-- **ReLU**: Rectified Linear Unit activation
+### Arithmetic / Linear Algebra
+- **MatMul**: Matrix multiplication (uses cuBLAS for large matrices)
+- **Gemm**: General matrix multiply with bias (alpha=1, beta=1 only)
 - **Add**: Element-wise addition with scalar broadcasting
+- **Sub**: Element-wise subtraction
+- **Mul**: Element-wise multiplication
+
+### Activations
+- **ReLU**: Rectified Linear Unit (vectorized with float4 optimization)
+- **Sigmoid**: Sigmoid activation function
+
+### Tensor Manipulation
+- **Transpose**: Matrix/tensor transposition
+- **Gather**: Gather elements along an axis using indices
+- **Shape**: Get shape of a tensor (metadata operation)
+- **Cast**: Type conversion between data types
+
+### Reductions
+- **ReduceSum**: Sum reduction along specified axes
+
+### Advanced Operations (LLM Support)
+- **RotaryEmbedding**: Rotary position embeddings for transformers
+- **GroupQueryAttention**: Multi-head attention with grouped queries and KV cache
+- **SimplifiedLayerNormalization**: Layer normalization (epsilon=1e-5)
+- **SkipSimplifiedLayerNormalization**: Layer normalization with skip/residual connection
+
+**Note**: All operations support both CPU (with OpenMP multi-threading) and GPU execution where applicable.
 
 ## Architecture Overview
 
@@ -260,17 +435,28 @@ ONNX-GPU-Execution-Engine/
 │   ├── gpu/                     # GPU execution and benchmarking
 │   │   ├── gpu_executor.*       # Graph executor with CPU/GPU support
 │   │   ├── benchmark.*          # Multi-configuration benchmark system
+│   │   ├── ops/                 # Operation implementations (.inl files)
 │   │   └── kernels/             # CUDA kernels
 │   │       ├── kernels.cuh
 │   │       ├── matmul.cu
 │   │       ├── relu.cu
-│   │       └── add.cu
+│   │       ├── add.cu
+│   │       ├── gather.cu
+│   │       ├── sigmoid.cu
+│   │       ├── layernorm.cu
+│   │       ├── rotary_embedding.cu
+│   │       ├── group_query_attention.cu
+│   │       └── ... (other kernels)
 │   └── utils/                   # Utilities
 │       ├── tensor.*
 │       └── logger.*
 ├── scripts/                     # Build and setup scripts
-│   ├── setup_onnx_proto.sh
-│   └── create_test_model.py
+│   ├── setup/                   # Setup scripts subdirectory
+│   │   ├── setup_onnx_proto.sh
+│   │   └── full_setup.sh
+│   ├── export_models.py
+│   ├── validate_onnx.py
+│   └── hf_tokenizer.py
 ├── visualization/               # Benchmark visualization
 │   └── benchmark_viewer.html   # Interactive HTML dashboard
 ├── third_party/                 # Generated files (not in git)

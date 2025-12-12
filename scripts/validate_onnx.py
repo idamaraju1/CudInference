@@ -126,6 +126,7 @@ def main():
         ("simple_linear.onnx", (1, 10)),
         ("two_layer.onnx", (1, 10)),
         ("residual.onnx", (1, 10)),
+        ("sparse_linear.onnx", (1, 10)),
     ]
 
     results = {}
